@@ -1,0 +1,65 @@
+name: Build and test
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+        mode: [release, sanitizers]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Select macOS C++ standard library
+        if: runner.os == 'macOS'
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer" >> "$GITHUB_ENV"
+      - name: Prepare pinned SQLite oracle
+        run: python benchmarks/reference/prepare.py --output "$RUNNER_TEMP/sqlite-reference" --jobs 2
+      - name: Configure
+        shell: bash
+        run: |
+          if [ '${{ matrix.mode }}' = sanitizers ]; then
+            mode=Debug
+            sanitize=ON
+          else
+            mode=Release
+            sanitize=OFF
+          fi
+          cmake -S . -B build/ci -DCMAKE_BUILD_TYPE="$mode" \
+            -DCORESQL_SANITIZERS="$sanitize" -DCORESQL_BENCHMARKS=ON \
+            -C "$RUNNER_TEMP/sqlite-reference/reference.cmake"
+      - name: Build
+        run: cmake --build build/ci -j 2
+      - name: Test
+        env:
+          ASAN_OPTIONS: halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build/ci --output-on-failure -j 2
+      - name: Production build and relocated package
+        if: matrix.mode == 'release'
+        run: |
+          cmake -S . -B build/package -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build/package -j 2
+          python tests/package/check.py --build build/package
+      - name: Test diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f build/ci/Testing/Temporary/LastTest.log ]; then
+            cat build/ci/Testing/Temporary/LastTest.log
+          fi

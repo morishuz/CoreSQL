@@ -1,0 +1,14 @@
+{
+  "source": "https://www.sqlite.org/sqllogictest/",
+  "retrieved": "2026-09-11",
+  "selection": "Complete upstream test/select1.test through test/select5.test, unchanged and pinned by SHA-256.",
+  "files": {
+    "upstream/COPYRIGHT.md": "ff72613ed2ee289ae0d8a9d6ba02f8df624ff8dabea04a4d1fa7bb26828ca5c9",
+    "upstream/select1.test": "e93b83d64d06f78aee0e690455b6c604e86ad9a339f77d927a782cefb6b0e1d5",
+    "upstream/select2.test": "a8ecc3d206c4d4b2cd6a154c18999e558ec97168cd7e327a4369e23aaf31be64",
+    "upstream/select3.test": "d5c321683bfe903c9be95ebe80a8d23da4d8f4a39193b2087dbc34cb4e137623",
+    "upstream/select4.test": "155ff6bb9bbf7c2dcf1e5659bb1688dec5dab58126f8dc66d23dcae6df43f59e",
+    "upstream/select5.test": "049a5d0bf90999c56db2d5880ef28febdc88906526f87069cc96af9f84c99869"
+  },
+  "expanded": "2026-09-13"
+}

@@ -1,0 +1,108 @@
+{
+  "source": "https://github.com/duckdb/duckdb",
+  "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+  "query_directory": "extension/tpch/dbgen/queries",
+  "schema_source": "extension/tpch/dbgen/dbgen.cpp",
+  "schema_sha256": "122b8b0616aeff875d15fd0038ee7f212f374a404454ef74bd529e6f47ca19b8",
+  "purpose": "Empty-schema syntax/binding diagnostic only; Native DATE and DECIMAL(15,2), integer widths mapped to INTEGER; no data or constraints. Not a TPC-H benchmark.",
+  "diagnostic_schema": [
+    "CREATE TABLE region(r_regionkey INTEGER,r_name TEXT,r_comment TEXT)",
+    "CREATE TABLE nation(n_nationkey INTEGER,n_name TEXT,n_regionkey INTEGER,n_comment TEXT)",
+    "CREATE TABLE supplier(s_suppkey INTEGER,s_name TEXT,s_address TEXT,s_nationkey INTEGER,s_phone TEXT,s_acctbal DECIMAL(15,2),s_comment TEXT)",
+    "CREATE TABLE customer(c_custkey INTEGER,c_name TEXT,c_address TEXT,c_nationkey INTEGER,c_phone TEXT,c_acctbal DECIMAL(15,2),c_mktsegment TEXT,c_comment TEXT)",
+    "CREATE TABLE part(p_partkey INTEGER,p_name TEXT,p_mfgr TEXT,p_brand TEXT,p_type TEXT,p_size INTEGER,p_container TEXT,p_retailprice DECIMAL(15,2),p_comment TEXT)",
+    "CREATE TABLE partsupp(ps_partkey INTEGER,ps_suppkey INTEGER,ps_availqty INTEGER,ps_supplycost DECIMAL(15,2),ps_comment TEXT)",
+    "CREATE TABLE orders(o_orderkey INTEGER,o_custkey INTEGER,o_orderstatus TEXT,o_totalprice DECIMAL(15,2),o_orderdate DATE,o_orderpriority TEXT,o_clerk TEXT,o_shippriority INTEGER,o_comment TEXT)",
+    "CREATE TABLE lineitem(l_orderkey INTEGER,l_partkey INTEGER,l_suppkey INTEGER,l_linenumber INTEGER,l_quantity DECIMAL(15,2),l_extendedprice DECIMAL(15,2),l_discount DECIMAL(15,2),l_tax DECIMAL(15,2),l_returnflag TEXT,l_linestatus TEXT,l_shipdate DATE,l_commitdate DATE,l_receiptdate DATE,l_shipinstruct TEXT,l_shipmode TEXT,l_comment TEXT)"
+  ],
+  "queries": [
+    {
+      "file": "q01.sql",
+      "sha256": "8aefe77a1c97459bc69acbbcdaf3b8637d8ea22dfc3ac7be732d4446da83b69b"
+    },
+    {
+      "file": "q02.sql",
+      "sha256": "a2219893f952dd2a2586ab297d909ec2d440faabb5e692f24880158aa6877344"
+    },
+    {
+      "file": "q03.sql",
+      "sha256": "1f120d790d4914652cbf3fbc0fa28ed6573e4adee61ae7164a8c3d99b7c6b7fe"
+    },
+    {
+      "file": "q04.sql",
+      "sha256": "2a2be89752fc917bc71e1a59168ead9d00d40c40ea0bbe646206e414b372f888"
+    },
+    {
+      "file": "q05.sql",
+      "sha256": "495def7debb02ab1def31da07fbc88b4796813b754832ce15d54a35dcb104577"
+    },
+    {
+      "file": "q06.sql",
+      "sha256": "3638535fb92a6026b3359a2ad9e6ed7da9ad9080152513e6fd3818d1a853c29f"
+    },
+    {
+      "file": "q07.sql",
+      "sha256": "5e8077121a42ca8ebf5ff54e5842a614e839da945b0331e3b63d9ccad2361201"
+    },
+    {
+      "file": "q08.sql",
+      "sha256": "948338f54b97a2c49aea15f8c4d609ecf244d00ad7754edcea60b4748504a1ce"
+    },
+    {
+      "file": "q09.sql",
+      "sha256": "af90ccbe30ece396209e6627c10c0086ed54208100357922ee404de8bb867e56"
+    },
+    {
+      "file": "q10.sql",
+      "sha256": "0b48b00cffa3776b32e67e9041191dea25095e2a952ee5251990b9c8585031ed"
+    },
+    {
+      "file": "q11.sql",
+      "sha256": "f313c766fac507c1204fb6f2bacd35719a61a11c0f69601302555150dddeda78"
+    },
+    {
+      "file": "q12.sql",
+      "sha256": "3814c9f4b7a476ee894c477d43cedb299603b1ed0f5315790d52839c8da355bf"
+    },
+    {
+      "file": "q13.sql",
+      "sha256": "4a4a0b2c5646b2cad8f220a8f4b73ccb9f0acd45542353d63c18a69227bc20a3"
+    },
+    {
+      "file": "q14.sql",
+      "sha256": "e7ec7960a4c49219fc76dc03495a1530aeb30c796413dd1dc9d501b86934f222"
+    },
+    {
+      "file": "q15.sql",
+      "sha256": "1cb57383eeff60261a1b4b2a141c71d8672729d743a7dfa74d9a4bcaf69c44d4"
+    },
+    {
+      "file": "q16.sql",
+      "sha256": "45085e7672cb1500e625e048156fc55369e7a9bc91fd3647c3f7735a870c3ef8"
+    },
+    {
+      "file": "q17.sql",
+      "sha256": "dfc7f00ac8a500c2ac2735b05b41b462bbe4af9ce7cd6c37e42d1bb9df4a02e1"
+    },
+    {
+      "file": "q18.sql",
+      "sha256": "8c5076061727d974f96708f0da930fc58843eac297a80c7ad658d64d152a19bb"
+    },
+    {
+      "file": "q19.sql",
+      "sha256": "341f97d1f74deb30aca2a8b0ee849772a3b0e098a06cf12266c63573cb985478"
+    },
+    {
+      "file": "q20.sql",
+      "sha256": "fa96ad5cb897bf31ec9b96a6b2a0d1f7132e71e2f481321e6db16628bc3e5fd5"
+    },
+    {
+      "file": "q21.sql",
+      "sha256": "b29463f30a64e45a795047ee6e557e6c3c1f01fc612acc997873594048e74b59"
+    },
+    {
+      "file": "q22.sql",
+      "sha256": "d8ed6332e75f9193391000ba071e17adcf735a2d99c5a4da0f7c13d695ccbd42"
+    }
+  ]
+}

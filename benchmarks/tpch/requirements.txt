@@ -1,0 +1,2 @@
+# Optional generator/reference only; never linked into CoreSQL.
+duckdb==1.5.5

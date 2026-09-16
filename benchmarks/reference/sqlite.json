@@ -1,0 +1,9 @@
+{
+  "project": "SQLite",
+  "version": "3.54.0 development baseline",
+  "git_commit": "f3b9f74d81132426dee1ccc07a67fdad2ccfeaa9",
+  "fossil_checkin": "4021369bc9558fbfcfa83ee4cd6b986734b8c41b6d72bd97064e566ca8189ea8",
+  "url": "https://codeload.github.com/sqlite/sqlite/tar.gz/f3b9f74d81132426dee1ccc07a67fdad2ccfeaa9",
+  "sha256": "6a25912c84a0a6d9752373d6e073ffb07715db5015263242f5d4ea990da7b096",
+  "speedtest1_sha256": "5cd19d9e626d148d825aa900c9f8acdac7343b26d4c7e7fa07291a64c50827a2"
+}
