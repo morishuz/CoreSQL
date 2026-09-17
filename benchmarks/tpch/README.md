@@ -240,8 +240,16 @@ library/adapter fingerprints and explicit engine order. The raw field
 CoreSQL speedup, below 1 means CoreSQL is slower. The three drivers have different
 result-conversion overhead, so this remains a client-latency comparison.
 
-See [the retained three-engine table](results/OPTIMIZATION_ROUND2.md) and the
-[type-adapter regression fixes](results/TYPE_MODULARIZATION_FIXES_20260917.md).
+See [the retained three-engine table](results/OPTIMIZATION_ROUND2.md).
+
+The September 17 type-adapter regression check used the same SF 0.03 dataset,
+Release settings and resource limits. All 22 repaired queries matched DuckDB;
+Q7/Q8 returned to baseline performance and Q9 completed within the memory limit.
+Average loading was 3.246 s versus the 3.582 s committed baseline. A separate
+nine-sample Q17 check measured 13.125 ms versus 12.994 ms, with identical execution
+counters. These observations are workload-specific, not general performance
+claims. Intermediate and final diagnostic artifacts are retained in Git history
+at `60fb00554edc578f2870d16ee90b792bc5dad630`, rather than in the current source tree.
 
 ### Inspect execution work
 

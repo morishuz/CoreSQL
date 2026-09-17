@@ -63,8 +63,8 @@ C++20 Release configuration.
 | Q17 follow-up | Nine samples: 13.125 ms fixed vs 12.994 ms baseline; execution counters identical |
 | Whitespace and fixture integrity | Passed |
 
-See [the measured fixes and raw results](../benchmarks/tpch/results/TYPE_MODULARIZATION_FIXES_20260917.md)
-for per-query times and provenance. Local testing does not replace hosted testing
+See [the benchmark methodology and summary](../benchmarks/tpch/README.md)
+for the measured outcome and historical evidence location. Local testing does not replace hosted testing
 of the new commit.
 
 ## Repository and hosted CI
