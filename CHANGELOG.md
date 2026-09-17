@@ -2,6 +2,30 @@
 
 ## Unreleased — preparing 0.1.0
 
+- Preserve typed adapter operation repeatability, including correlated scopes,
+  so EXTRACT aggregates retain streaming and bounded subquery reuse. Avoid
+  duplicate conversion dispatch, temporary conversion calls for constant inserts,
+  and operand-tree copies during SQL adapter selection.
+
+- Finish grouping all add-on implementations into provider directories. Keep
+  source contents, public headers, library targets and SQL support unchanged;
+  replace transitional build-path detection with explicit source declarations.
+
+- Preserve the originating scalar type through SQL affinity dispatch, scope DATE
+  year extraction to its operands, and name shared scalar expression policy
+  independently of INTEGER registration. Add a runnable custom-type walkthrough
+  tested against both backend-only and SQL installed-package consumers.
+
+- Add a shared SQL type-adapter interface and migrate DATE/DECIMAL to it. Keep
+  domain implementations and SQL policy together under `addons/date/` and
+  `addons/decimal/`; preserve encodings and existing default SQL behavior.
+- Add VECTOR SQL declarations, text construction/conversion and squared L2
+  distance through the same interface, with domain code in `addons/vector/`.
+  Preserve the backend API and float32 encoding; ANN indexes remain out of scope.
+- Move integer, real and text SQL declarations, conversion, affinity and arithmetic
+  policy behind scalar adapters in `addons/scalars/`. Keep dynamic SQL values and
+  SQL-wide comparison/evaluation rules shared.
+
 - Keep the configured encoded-size limit consistent across library and in-tree
   consumers; add persistence/rejection coverage and an 8 MiB validation command.
 - Prepare a single-commit main branch while preserving development history on a

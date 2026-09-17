@@ -1,7 +1,7 @@
 # Types and indexes
 
 Every type uses `TypeAddon`, including the bundled integer, real and string
-implementations in `addons/scalars.cpp`. `Registry` installs those by default.
+implementations in `addons/scalars/type.cpp`. `Registry` installs those by default.
 `Registry(false)` starts without types; `install_scalar_types(registry)` adds
 them explicitly. There is no native comparison or validation fallback when a
 type is absent. Database construction copies the registry and freezes its contract.
@@ -69,6 +69,106 @@ larger sets use hash lookup.
 Callbacks are trusted application code, deterministic, non-reentrant and free
 of database mutations. Captured resources must outlive their use, typically via
 shared ownership. This is a C++ source interface, not a stable shared-library ABI.
+
+## SQL type adapters
+
+`coresql/sql_types.hpp` adds an optional SQL policy layer over `TypeAddon`.
+DATE, DECIMAL and VECTOR use this interface: each has `type.cpp` for its independent
+backend implementation and `sql.cpp` for its SQL adapter under `addons/<type>/`.
+The SQL library compiles the adapters; backend-only users still link the domain
+library without SQL. Integer, real and text use the same adapter interface, with
+backend registration in `addons/scalars/type.cpp` and SQL policy in
+`addons/scalars/sql.cpp`. Their adapters own aliases, casts, storage conversion,
+numeric-text parsing and affinity callbacks. The explicitly named shared scalar
+policy in the same module installs arithmetic and selects mixed-scalar operations
+and result types. SQL installs it once, independently of the individual adapters;
+REAL-only SQL composition does not depend on the INTEGER adapter. Adapter rules
+are consulted first, and shared scalar rules are the fallback.
+
+Start with the defaults and register an application adapter before installation:
+
+```cpp
+auto types = sql::default_type_adapters();
+types.add(my_sql_adapter()); // returns sql::SqlTypeAdapter
+Registry registry;
+sql::install(registry, types);
+Database db(registry);
+sql::Connection connection(db, registry, types);
+sql::Statement statement("SELECT CAST(? AS MYTYPE)", types);
+```
+
+Use the same configuration for installation, connections, statements and
+`prepare_script`. Copies share an immutable snapshot; adding an adapter creates
+a new snapshot without changing existing connections or statements. Executing a
+statement prepared with a different snapshot is rejected. `TypeAdapters{}` supplies
+scalar SQL adapters; `TypeAdapters(false)` starts
+without type adapters for explicit composition using `integer_adapter()`,
+`real_adapter()` and `text_adapter()`. `default_type_adapters()` also supplies
+DATE, DECIMAL and VECTOR. Scalar SQL adapters expect the registry's normal backend
+scalar types/functions; they do not reinstall them. Domain installation invokes
+each adapter's backend installer, so do not also install those domains separately.
+Shared SQL scalar expression rules remain available even with an empty adapter set.
+For a complete implementation, see [adding your own type](../extensions/custom-type.md).
+
+An adapter identifies one type family by ID/version. Required callbacks declare
+its parameterized type, install its backend support, recognize conversions and
+perform them. Names are case-insensitive SQL aliases. `SqlDeclaration` provides
+the normalized alias, unsigned 64-bit parameters and whether it is a CAST target;
+this preserves rules such as a positive optional length on VARCHAR declarations
+but no length on VARCHAR casts. Parsing punctuation stays generic. Optional
+callbacks provide typed string
+literals, operator/function lowering, and common result types for CASE/UNION.
+Operator lowering selects registered backend functions; it does not replace the
+parser or execution engine. Numeric-literal hooks preserve exact decimal spelling.
+The parser checks declared/literal type identities and conversion results must
+match the requested target type.
+
+Duplicate families or aliases are rejected without changing the configuration.
+Multiple adapters claiming the same conversion, operation or common-type decision
+produce a type error instead of depending on registration order. Adapters should
+return no rule for types/operations they do not own. Operation names include SQL
+operator spellings, `negate`, `between`, function names and `sql.extract.year`.
+For function dispatch, a type with an empty ID denotes an untyped NULL literal;
+CAST/parameter NULLs retain their declared type. Repeatability checks use the
+same operand-type dispatch as SQL lowering.
+An overloaded operation must check operand types before claiming the operation.
+DATE supplies the default context for `EXTRACT(YEAR FROM NULL)`; another adapter
+can handle typed timestamps without conflicting with DATE. Multiple claims for
+an untyped NULL are ambiguous too; use an explicit CAST to disambiguate.
+
+NULL propagation, lazy branches, binding, transactions and persistence remain
+shared SQL/core responsibilities. Callbacks are trusted, deterministic C++ code
+and must own retained resources. Optimization promises (`repeatable` and
+`reorder_comparisons`) default to false; enable them only when repeated evaluation
+is equivalent and comparison reordering cannot introduce errors. SQL resolves
+operation repeatability using operand types in the current query scope, including
+correlated subqueries; analysis does not add execution captures. The registry's
+conversion helpers resolve registered rules; normal SQL handles identity and
+NULL before dispatching conversions. `try_convert` resolves and executes a rule
+in one pass, returning no value only when no adapter claims the conversion;
+ambiguity, callback errors and wrong result types still throw. Constant INSERT
+values use this same conversion policy without a temporary SQL conversion call.
+`SqlAffinity` identifies SQL's existing
+native scalar comparison categories; `apply_affinity` implements their value
+conversion. Comparisons, BETWEEN, membership and simple CASE retain the actual
+source type when selecting that callback, including REAL rather than substituting
+INTEGER. The shared lowerer retains SQL-wide affinity precedence (numeric before
+text, then the left operand for equal priority).
+
+Affinity applies to native SQL scalars, not arbitrary domain types. It must leave
+already-affiliated values unchanged: the adapter's own native type, and both
+INTEGER and REAL for numeric affinity. This preserves same-type comparisons and
+membership optimizations. Custom equality/collation belongs to `TypeAddon`, not
+the affinity callback.
+
+The dynamic `sql.value` representation and its native scalar restriction,
+`CAST AS NUMERIC` syntax, numeric/text storage-class comparison, generic grammar,
+boolean/NULL/lazy evaluation, string-function argument adaptation, binding,
+transactions and persistence remain shared. Optimizations still recognize
+canonical native scalars. These are SQL/core responsibilities, not a promise that
+every language rule or representation is replaceable through an adapter.
+No callback or SQL adapter configuration is
+serialized: register the same domain identities before reopening a database.
 
 ## Index contract
 

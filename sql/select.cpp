@@ -1,5 +1,4 @@
 #include "lower.hpp"
-#include "coresql/date.hpp"
 #include <set>
 
 namespace coresql::sql::detail {
@@ -60,7 +59,8 @@ bool safe_prefix(const Node& n, const Lowerer& lower) {
             return false;
     auto type = lower.expression_type(lower.expression(n.args[0]));
     return type && (n.name != "like" || *type == text()) &&
-           (*type == integer() || *type == real() || *type == text() || *type == dates::type()) &&
+           (*type == integer() || *type == real() || *type == text() ||
+            (lower.types->find(*type) && lower.types->find(*type)->reorder_comparisons)) &&
            std::all_of(n.args.begin() + 1, n.args.end(),
                        [&](const Node& a) { return lower.expression_type(lower.expression(a)) == type; });
 }
@@ -315,6 +315,7 @@ void plan_compounds(const Select& s, const Lowerer& lower, const Lowerer& local,
                 expanded[relation.name] = relation.columns;
             Lowerer context{expanded,       lower.registry, lower.parameters,     {}, lower.outer,
                             lower.captures, false,          lower.parameter_types};
+            context.types = lower.types;
             if (!part.table.empty())
                 context.sources.push_back({part.table, part.alias.empty() ? part.table : part.alias});
             for (const auto& j : part.joins)
@@ -328,7 +329,7 @@ void plan_compounds(const Select& s, const Lowerer& lower, const Lowerer& local,
         for (const auto& part : parts)
             types.push_back(output_types(part));
         for (std::size_t i = 0; i < q.select.size(); ++i) {
-            bool mixed = false, builtin = true, known = true;
+            bool mixed = false, known = true;
             auto first = types[0][i];
             for (const auto& t : types) {
                 if (i >= t.size())
@@ -338,23 +339,18 @@ void plan_compounds(const Select& s, const Lowerer& lower, const Lowerer& local,
                     continue;
                 }
                 mixed |= *t[i] != *first;
-                builtin &= scalar_type(*t[i]);
             }
             if (mixed && known) {
                 std::vector<Type> numeric;
                 for (const auto& t : types)
                     numeric.push_back(*t[i]);
-                if (auto common = decimal_common(numeric)) {
+                if (auto common = lower.types->common_type(numeric)) {
                     q.select[i] = local.conversion(std::move(q.select[i]), *common);
                     for (auto& part : parts)
                         part.select[i] = local.conversion(std::move(part.select[i]), *common);
                     continue;
                 }
-                if (!builtin)
-                    throw Error(ErrorCode::type, "Compound extension types must match");
-                q.select[i] = call("sql.cast_box", {std::move(q.select[i])});
-                for (auto& part : parts)
-                    part.select[i] = call("sql.cast_box", {std::move(part.select[i])});
+                throw Error(ErrorCode::type, "Compound result types have no common SQL type");
             }
         }
         for (std::size_t i = 0; i < parts.size(); ++i)

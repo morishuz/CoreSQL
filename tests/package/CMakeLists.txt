@@ -10,3 +10,12 @@ target_link_libraries(package_addons PRIVATE CoreSQL::sql CoreSQL::vector CoreSQ
 enable_testing()
 add_test(NAME package_core COMMAND package_core)
 add_test(NAME package_addons COMMAND package_addons)
+
+# The documented custom type must use only installed CoreSQL headers/libraries.
+set(custom_type ../../examples/custom_type)
+add_executable(package_custom_type ${custom_type}/main.cpp ${custom_type}/type.cpp ${custom_type}/sql.cpp)
+target_link_libraries(package_custom_type PRIVATE CoreSQL::sql)
+add_test(NAME package_custom_type COMMAND package_custom_type)
+add_executable(package_custom_type_core custom_type_core.cpp ${custom_type}/type.cpp)
+target_link_libraries(package_custom_type_core PRIVATE CoreSQL::core)
+add_test(NAME package_custom_type_core COMMAND package_custom_type_core)

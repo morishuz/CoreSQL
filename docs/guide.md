@@ -110,7 +110,9 @@ multi-statement operations atomic; see [graph composition](extensions/graph.md).
 
 `vectors::type()` accepts variable-length float32 vectors; `vectors::type(768)`
 requires exactly 768 elements. Construct fixed-size values with the same dimension
-parameter. There is no implicit conversion between type instances. NaN and
+parameter. The typed C++ API has no implicit conversion between type instances; the
+[SQL adapter](contracts/sql.md#vector-sql-adapter) validates and converts dimensions
+on assignment and CAST. NaN and
 infinity are rejected; positive and negative zero compare equal. Vectors have no
 ordering callback; sort their squared L2 distance instead. Distances use double
 accumulation and reject mismatched lengths.

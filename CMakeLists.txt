@@ -18,7 +18,7 @@ add_library(coresql
   src/disjunctive_join.cpp src/relation.cpp src/subquery_plan.cpp src/mutation.cpp
   src/transaction.cpp src/schema.cpp src/registry.cpp src/index.cpp
   src/ordered_index.cpp src/key_index.cpp src/snapshot.cpp src/storage.cpp
-  addons/scalars.cpp addons/aggregates.cpp addons/relational_functions.cpp addons/hash_index.cpp)
+  addons/scalars/type.cpp addons/aggregates/aggregates.cpp addons/relational/functions.cpp addons/hash_index/index.cpp)
 target_include_directories(coresql PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
@@ -35,13 +35,24 @@ if(CORESQL_SANITIZERS)
 endif()
 
 # Add-ons use the public core API; SQL remains an independently linked frontend.
-foreach(addon vector timestamp spatial json graph date decimal)
-  add_library(coresql_${addon} addons/${addon}.cpp)
-  target_link_libraries(coresql_${addon} PUBLIC coresql)
-  target_compile_options(coresql_${addon} PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
-endforeach()
-add_library(coresql_sql sql/parser.cpp sql/lower.cpp sql/select.cpp sql/execute.cpp sql/insert.cpp sql/values.cpp sql/coercion.cpp sql/typing.cpp sql/decimal.cpp sql/relations.cpp sql/strings.cpp)
-target_link_libraries(coresql_sql PUBLIC coresql coresql_date coresql_decimal)
+function(coresql_addon name source)
+  add_library(coresql_${name} ${source})
+  target_link_libraries(coresql_${name} PUBLIC coresql)
+  target_compile_options(coresql_${name} PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endfunction()
+coresql_addon(vector addons/vector/type.cpp)
+coresql_addon(timestamp addons/timestamp/type.cpp)
+coresql_addon(spatial addons/spatial/type.cpp)
+coresql_addon(json addons/json/type.cpp)
+coresql_addon(graph addons/graph/graph.cpp)
+coresql_addon(date addons/date/type.cpp)
+coresql_addon(decimal addons/decimal/type.cpp)
+add_library(coresql_sql
+  sql/parser.cpp sql/lower.cpp sql/select.cpp sql/execute.cpp sql/insert.cpp
+  sql/values.cpp sql/coercion.cpp sql/typing.cpp sql/type_lowering.cpp
+  sql/type_adapters.cpp sql/relations.cpp sql/strings.cpp
+  addons/decimal/sql.cpp addons/date/sql.cpp addons/vector/sql.cpp addons/scalars/sql.cpp)
+target_link_libraries(coresql_sql PUBLIC coresql coresql_date coresql_decimal coresql_vector)
 target_compile_options(coresql_sql PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 
 # Identical target names for add_subdirectory() and installed find_package().
@@ -72,6 +83,9 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CoreSQLConfig.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/CoreSQLConfigVersion.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CoreSQL)
 
+add_executable(coresql_custom_type examples/custom_type/main.cpp examples/custom_type/type.cpp examples/custom_type/sql.cpp)
+target_link_libraries(coresql_custom_type PRIVATE coresql_sql)
+
 add_executable(coresql_demo examples/demo.cpp)
 target_link_libraries(coresql_demo PRIVATE coresql_vector coresql_timestamp)
 add_executable(coresql_documents examples/documents.cpp)
@@ -98,6 +112,11 @@ function(coresql_test target name source)
 endfunction()
 
 if(BUILD_TESTING)
+  coresql_test(coresql_sql_type_dispatch_test sql_type_dispatch tests/sql_type_dispatch_test.cpp coresql_sql coresql_timestamp)
+  target_compile_definitions(coresql_sql_type_dispatch_test PRIVATE CORESQL_TESTING)
+  coresql_test(coresql_sql_scalar_adapter_test sql_scalar_adapters tests/sql_scalar_adapter_test.cpp coresql_sql)
+  coresql_test(coresql_sql_vector_test sql_vectors tests/sql_vector_test.cpp coresql_sql)
+  coresql_test(coresql_sql_type_adapter_test sql_type_adapters tests/sql_type_adapter_test.cpp coresql_sql)
   coresql_test(coresql_encoded_limit_test encoded_size_limit tests/encoded_limit_test.cpp coresql)
   add_test(NAME backup_restore_cli COMMAND ${CMAKE_COMMAND}
     -DEXAMPLE=$<TARGET_FILE:coresql_persistent_sql> -DADMIN=$<TARGET_FILE:coresql_admin>
@@ -178,6 +197,7 @@ if(BUILD_TESTING)
   target_link_libraries(coresql_nullable_test PRIVATE coresql_sql coresql_timestamp)
   add_test(NAME nullable_storage COMMAND coresql_nullable_test
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/before-nullable.corelog)
+  add_test(NAME custom_type_example COMMAND coresql_custom_type)
   add_test(NAME example COMMAND coresql_demo)
   add_test(NAME collection_example COMMAND coresql_collections)
   add_test(NAME json_example COMMAND coresql_json_demo)

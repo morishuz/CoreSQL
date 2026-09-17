@@ -3,9 +3,10 @@
 
 namespace coresql::sql::detail {
 Result insert(Transaction& tx, const Statement& s, const Registry& registry,
-              std::span<const Value> parameters) {
+              std::span<const Value> parameters, const TypeAdapters& adapters) {
     auto schema = tx.schema();
     Lowerer lower{schema, registry, parameters, {}};
+    lower.types = &adapters;
     auto select = [&](const Select& query) { return tx.query(lower.query(query)); };
     Result result;
     // RETURNING allocations and all rows form one atomic SQL statement.
@@ -80,7 +81,7 @@ Result insert(Transaction& tx, const Statement& s, const Registry& registry,
                 values[i] = allocate();
             if (!values[i])
                 throw Error(ErrorCode::constraint, "Missing non-NULL column: " + columns[i].name);
-            row.push_back(convert(std::move(*values[i]), columns[i].type));
+            row.push_back(convert(std::move(*values[i]), columns[i].type, false, adapters));
         }
         Row returned;
         for (auto c : returning)
@@ -114,7 +115,7 @@ Result insert(Transaction& tx, const Statement& s, const Registry& registry,
             throw Error(ErrorCode::schema, "SQL insertion projection width differs");
         for (std::size_t i = 0; i < input.types.size(); ++i) {
             const auto& target = columns[mapping.empty() ? i : mapping[i]].type;
-            if (!convertible(input.types[i], target))
+            if (!convertible(input.types[i], target, adapters))
                 throw Error(ErrorCode::type, "SQL insertion projection type differs");
         }
         std::set<std::size_t> supplied(mapping.begin(), mapping.end());
@@ -130,9 +131,8 @@ Result insert(Transaction& tx, const Statement& s, const Registry& registry,
                 throw Error(ErrorCode::schema, "SQL insertion width differs");
             Row row;
             for (std::size_t i = 0; i < nodes.size(); ++i)
-                row.push_back(evaluate_constant(
-                    lower.stored_expression(nodes[i], columns[mapping.empty() ? i : mapping[i]].type),
-                    registry));
+                row.push_back(
+                    lower.stored_constant(nodes[i], columns[mapping.empty() ? i : mapping[i]].type));
             insert(std::move(row));
         }
     if (scope)

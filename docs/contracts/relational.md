@@ -35,7 +35,7 @@ borrowed argument values, and `finish` returns a checked value or typed NULL.
 Registration and factories are validated even for LIMIT 0. Factories and callbacks
 are trusted native code under the same lifetime/non-reentrancy contract as scalar
 functions. The built-in count, sum, avg, min, max and group_concat live in
-`addons/aggregates.cpp`, not as branches in the query executor.
+`addons/aggregates/aggregates.cpp`, not as branches in the query executor.
 
 Empty sets produce count 0 and NULL for the other reductions. NULL inputs are
 ignored. Integer sum overflow is an error. Numeric aggregates accept integer or

@@ -9,7 +9,6 @@
 int main() {
     coresql::Registry registry;
     coresql::sql::install(registry);
-    coresql::vectors::install(registry);
     coresql::timestamps::install(registry);
     coresql::spatial::install(registry);
     coresql::json::install(registry);
@@ -22,6 +21,12 @@ int main() {
         return 1;
     if (sql.execute("WITH x AS (SELECT 7 AS n) SELECT n FROM (SELECT n FROM x) AS d").rows.at(0).at(0) !=
         coresql::Value(std::int64_t{7}))
+        return 1;
+    if (sql.execute("SELECT vector_squared_l2(VECTOR '[1,2]', VECTOR '[4,6]')").rows.at(0).at(0) !=
+        coresql::Value(25.0))
+        return 1;
+    if (sql.execute("SELECT CAST('12tail' AS INTEGER)+1").rows.at(0).at(0) !=
+        coresql::Value(std::int64_t{13}))
         return 1;
     return coresql::dates::format(sql.execute("SELECT DATE '2000-02-29'").rows.at(0).at(0)) == "2000-02-29"
                ? 0

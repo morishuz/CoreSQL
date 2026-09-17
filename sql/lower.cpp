@@ -1,29 +1,31 @@
 #include "lower.hpp"
-#include "coresql/date.hpp"
-#include "coresql/decimal.hpp"
+#include <array>
 #include <set>
 
 namespace coresql::sql::detail {
 namespace {
-std::optional<Type> column_affinity(const Node& n, std::optional<Type> type) {
-    if (n.kind == Node::function) {
-        if (n.name == "sql.cast_numeric" || n.name == "sql.cast_integer")
-            return integer();
-        if (n.name == "sql.cast_real")
-            return real();
-        if (n.name == "sql.cast_text")
-            return text();
-    }
-    if ((n.kind == Node::column || n.kind == Node::captured_column) && type &&
-        (*type == integer() || *type == real() || *type == text()))
+SqlAffinity affinity_kind(const TypeAdapters& adapters, const Type& type) {
+    auto adapter = adapters.find(type);
+    return adapter ? adapter->affinity : SqlAffinity::none;
+}
+std::optional<Type> column_affinity(const Node& n, std::optional<Type> type, const TypeAdapters& adapters) {
+    if (n.kind == Node::function && n.name == "sql.cast_numeric")
+        return integer();
+    if (n.kind == Node::function && n.name == "sql.cast_type")
+        type = type_of(n.value);
+    if ((n.kind == Node::column || n.kind == Node::captured_column ||
+         (n.kind == Node::function && n.name == "sql.cast_type")) &&
+        type && affinity_kind(adapters, *type) != SqlAffinity::none)
         return type;
     return {};
 }
-std::string equality_function(std::optional<Type> left, std::optional<Type> right = {}) {
-    auto numeric = [](const std::optional<Type>& t) { return t && (*t == integer() || *t == real()); };
-    return numeric(left) || numeric(right) ? "sql.equal_numeric"
-           : left || right                 ? "sql.equal_text"
-                                           : "sql.equal";
+std::string equality_function(const TypeAdapters& adapters, std::optional<Type> left,
+                              std::optional<Type> right = {}) {
+    auto numeric = [&](const std::optional<Type>& t) {
+        return t && affinity_kind(adapters, *t) == SqlAffinity::numeric;
+    };
+    auto selected = numeric(left) ? left : numeric(right) ? right : left ? left : right;
+    return selected ? affinity_function(*selected, true) : "sql.equal";
 }
 // Bare NULL has no domain identity. Give it the other operand's domain type
 // before registered comparison functions infer their argument types.
@@ -102,37 +104,38 @@ Expr Lowerer::expression(const Node& n) const {
         unsupported("Star is only valid as the complete projection or count(*)");
     case Node::membership: {
         auto value = expression(n.args[0]);
-        auto left_affinity = column_affinity(n.args[0], expression_type(value));
-        auto equality = decimals::is_decimal(expression_type(value).value_or(integer()))
-                            ? "decimal.equal"
-                            : equality_function(left_affinity);
+        auto left_affinity = column_affinity(n.args[0], expression_type(value), *types);
+        auto equality = equality_function(*types, left_affinity);
         if (n.query) {
             std::vector<std::pair<std::string, Expr>> bindings;
             Lowerer nested{schema, registry, parameters, {}, this, &bindings};
+            nested.types = types;
             nested.ctes = ctes;
             nested.relation_id = relation_id;
             auto q = nested.query(*n.query);
             auto candidate_type = expression_type(scalar_subquery(q, bindings));
-            if (decimals::is_decimal(candidate_type.value_or(integer())) ||
-                decimals::is_decimal(expression_type(value).value_or(integer()))) {
-                equality = "decimal.equal";
-                value = decimal_literal(n.args[0], std::move(value));
+            const std::array input_types{expression_type(value).value_or(integer()),
+                                         candidate_type.value_or(integer())};
+            if (auto op = types->operation("=", input_types)) {
+                equality = op->function;
+                value = contextual_literal(n.args[0], std::move(value), *op);
             } else if (n.query->compounds.empty() && n.query->projection.size() == 1)
-                equality =
-                    equality_function(left_affinity, column_affinity(n.query->projection[0], candidate_type));
+                equality = equality_function(*types, left_affinity,
+                                             column_affinity(n.query->projection[0], candidate_type, *types));
             return membership(std::move(value), std::move(q), equality, std::move(bindings));
         }
         std::vector<Expr> candidates;
         for (std::size_t i = 1; i < n.args.size(); ++i)
             candidates.push_back(expression(n.args[i]));
-        if (decimals::is_decimal(expression_type(value).value_or(integer())) ||
-            std::any_of(candidates.begin(), candidates.end(), [&](const Expr& e) {
-                return decimals::is_decimal(expression_type(e).value_or(integer()));
-            })) {
-            value = decimal_literal(n.args[0], std::move(value));
+        std::vector<Type> input;
+        for (const auto& candidate : candidates)
+            input.push_back(expression_type(candidate).value_or(integer()));
+        input.push_back(expression_type(value).value_or(integer()));
+        if (auto op = types->operation("=", input)) {
+            value = contextual_literal(n.args[0], std::move(value), *op);
             for (std::size_t i = 0; i < candidates.size(); ++i)
-                candidates[i] = decimal_literal(n.args[i + 1], std::move(candidates[i]));
-            equality = "decimal.equal";
+                candidates[i] = contextual_literal(n.args[i + 1], std::move(candidates[i]), *op);
+            equality = op->function;
         }
         return membership(std::move(value), std::move(candidates), equality);
     }
@@ -140,6 +143,7 @@ Expr Lowerer::expression(const Node& n) const {
     case Node::exists: {
         std::vector<std::pair<std::string, Expr>> bindings;
         Lowerer nested{schema, registry, parameters, {}, this, &bindings};
+        nested.types = types;
         nested.ctes = ctes;
         nested.relation_id = relation_id;
         auto q = nested.query(*n.query);
@@ -168,16 +172,18 @@ Expr Lowerer::expression(const Node& n) const {
                 branch.first = truth(std::move(branch.first));
         if (first) {
             auto base = expression(n.args[0]);
-            bool decimal = decimals::is_decimal(expression_type(base).value_or(integer())) ||
-                           std::any_of(branches.begin(), branches.end(), [&](const auto& branch) {
-                               return decimals::is_decimal(expression_type(branch.first).value_or(integer()));
-                           });
-            auto equality = decimal ? "decimal.equal"
-                                    : equality_function(column_affinity(n.args[0], expression_type(base)));
-            if (decimal) {
-                base = decimal_literal(n.args[0], std::move(base));
+            std::vector<Type> inputs{expression_type(base).value_or(integer())};
+            for (const auto& branch : branches)
+                inputs.push_back(expression_type(branch.first).value_or(integer()));
+            auto op = types->operation("=", inputs);
+            auto equality =
+                op ? op->function
+                   : equality_function(*types, column_affinity(n.args[0], expression_type(base), *types));
+            if (op) {
+                base = contextual_literal(n.args[0], std::move(base), *op);
                 for (std::size_t i = 0; i < branches.size(); ++i)
-                    branches[i].first = decimal_literal(n.args[first + 2 * i], std::move(branches[i].first));
+                    branches[i].first =
+                        contextual_literal(n.args[first + 2 * i], std::move(branches[i].first), *op);
             }
             return choose(std::move(base), equality, std::move(branches), std::move(otherwise));
         }
@@ -186,8 +192,8 @@ Expr Lowerer::expression(const Node& n) const {
     case Node::unary:
         if (n.name == "-") {
             auto e = expression(n.args[0]);
-            auto name = decimals::is_decimal(expression_type(e).value_or(integer())) ? "decimal.negate"
-                                                                                     : "sql.numeric_negate";
+            auto op = operation("negate", std::span<const Expr>(&e, 1));
+            auto name = op ? op->function : "negate";
             return call(name, {std::move(e)});
         }
         return call(function_name(n.name),
@@ -214,38 +220,30 @@ Expr Lowerer::expression(const Node& n) const {
             std::vector<Expr> args;
             for (const auto& a : n.args)
                 args.push_back(expression(a));
-            bool decimal = std::any_of(args.begin(), args.end(), [&](const Expr& e) {
-                return decimals::is_decimal(expression_type(e).value_or(integer()));
-            });
-            if (decimal)
+            auto op = operation("between", args);
+            if (op)
                 for (std::size_t i = 0; i < args.size(); ++i)
-                    args[i] = decimal_literal(n.args[i], std::move(args[i]));
+                    args[i] = contextual_literal(n.args[i], std::move(args[i]), *op);
             domain_nulls({&args[0], &args[1], &args[2]}, *this);
-            if (decimal)
-                return call("decimal.between", std::move(args));
+            if (op)
+                return call(op->function, std::move(args));
             auto type = expression_type(args[0]);
-            if (n.args[0].kind == Node::column && type &&
-                (*type == integer() || *type == real() || *type == text()))
+            if (n.args[0].kind == Node::column && type && affinity_kind(*types, *type) != SqlAffinity::none)
                 for (std::size_t i = 1; i < 3; ++i) {
                     auto other = expression_type(args[i]);
                     if (other && *other != *type)
-                        args[i] = call(*type == text() ? "sql.cast_text" : "sql.numeric_affinity",
-                                       {std::move(args[i])});
+                        args[i] = call(affinity_function(*type), {std::move(args[i])});
                 }
             return call("sql.between", std::move(args));
         }
-        auto left = expression(n.args[0]), right = expression(n.args[1]);
-        if ((comparison(n.name) || n.name == "+" || n.name == "-" || n.name == "*" || n.name == "/") &&
-            (decimals::is_decimal(expression_type(left).value_or(integer())) ||
-             decimals::is_decimal(expression_type(right).value_or(integer())))) {
-            left = decimal_literal(n.args[0], std::move(left));
-            right = decimal_literal(n.args[1], std::move(right));
+        std::array operands{expression(n.args[0]), expression(n.args[1])};
+        auto& left = operands[0];
+        auto& right = operands[1];
+        if (auto op = operation(n.name, operands)) {
+            left = contextual_literal(n.args[0], std::move(left), *op);
+            right = contextual_literal(n.args[1], std::move(right), *op);
             domain_nulls({&left, &right}, *this);
-            auto op = function_name(n.name);
-            op = op.substr(op.find_last_of('.') + 1);
-            if (op.starts_with("numeric_"))
-                op = op.substr(8);
-            return call("decimal." + op, {std::move(left), std::move(right)});
+            return call(op->function, {std::move(left), std::move(right)});
         }
         // Literal text concatenation cannot fail with a value/type error. Expose
         // its value to the core's range-index selection after parameter binding.
@@ -267,13 +265,12 @@ Expr Lowerer::expression(const Node& n) const {
             auto lt = expression_type(left), rt = expression_type(right);
             if (lt && rt && *lt != *rt && scalar_type(*lt) && scalar_type(*rt)) {
                 auto affinity = [&](Expr& value, const Type& source_type) {
-                    value = call(source_type == text() ? "sql.cast_text" : "sql.numeric_affinity",
-                                 {std::move(value)});
+                    value = call(affinity_function(source_type), {std::move(value)});
                 };
-                auto la = column_affinity(n.args[0], lt), ra = column_affinity(n.args[1], rt);
-                if (la && *la != text())
+                auto la = column_affinity(n.args[0], lt, *types), ra = column_affinity(n.args[1], rt, *types);
+                if (la && affinity_kind(*types, *la) == SqlAffinity::numeric)
                     affinity(right, *la);
-                else if (ra && *ra != text())
+                else if (ra && affinity_kind(*types, *ra) == SqlAffinity::numeric)
                     affinity(left, *ra);
                 else if (la)
                     affinity(right, *la);
@@ -281,18 +278,10 @@ Expr Lowerer::expression(const Node& n) const {
                     affinity(left, *ra);
             }
         }
-        // Preserve registered integer operations when conversion is unnecessary.
-        // Mixed/text/dynamic operands still use the SQL conversion functions.
-        if ((n.name == "+" || n.name == "*" || n.name == "&") && expression_type(left) == integer() &&
-            expression_type(right) == integer())
-            return call(n.name == "+"   ? "integer.add"
-                        : n.name == "*" ? "integer.multiply"
-                                        : "integer.bitand",
-                        {std::move(left), std::move(right)});
         return call(function_name(n.name), {std::move(left), std::move(right)});
     }
     case Node::function: {
-        if (n.name == "sql.cast_decimal")
+        if (n.name == "sql.cast_type")
             return stored_expression(n.args.at(0), type_of(n.value), true);
         bool reduction = false;
         try {
@@ -307,9 +296,16 @@ Expr Lowerer::expression(const Node& n) const {
         } else
             for (const auto& a : n.args)
                 args.push_back(expression(a));
-        if ((n.name == "date.year" || n.name == "text.substring") && !args.empty() &&
-            args[0].kind == Expr::Kind::literal && is_null(args[0].value))
-            args[0] = literal(Null(n.name == "date.year" ? dates::type() : text()));
+        auto adapted = operation(n.name, args, n.args);
+        if (n.name.starts_with("sql.extract.") && !adapted)
+            unsupported("Unsupported EXTRACT field or type");
+        if (adapted && adapted->null_type)
+            for (auto& arg : args)
+                if (arg.kind == Expr::Kind::literal && is_null(arg.value))
+                    arg = literal(Null(*adapted->null_type));
+        if (n.name == "text.substring" && !args.empty() && args[0].kind == Expr::Kind::literal &&
+            is_null(args[0].value))
+            args[0] = literal(Null(text()));
         if (n.distinct && (!reduction || args.size() != 1))
             throw Error(ErrorCode::schema, "DISTINCT requires a single aggregate argument");
         if (n.name == "length" || n.name == "like")
@@ -330,22 +326,7 @@ Expr Lowerer::expression(const Node& n) const {
             unify(arms);
             return coalesce(std::move(args));
         }
-        if (n.name == "sql.cast_date" && args.size() == 1 && args[0].kind == Expr::Kind::literal &&
-            is_null(args[0].value))
-            args[0] = literal(Null(dates::type()));
-        auto name = n.name;
-        if (args.size() == 1 && decimals::is_decimal(expression_type(args[0]).value_or(integer()))) {
-            if (name == "sum" || name == "avg")
-                name = "decimal." + name;
-            else if (name == "abs")
-                name = "decimal.abs";
-        }
-        if (reduction && args.size() == 1) {
-            auto type = expression_type(args[0]);
-            if (type && (((name == "sum" || name == "avg") && (*type == text() || *type == any_type())) ||
-                         (name == "group_concat" && (*type == real() || *type == any_type()))))
-                name = "sql." + name;
-        }
+        auto name = adapted ? adapted->function : n.name;
         return reduction ? aggregate(name, std::move(args), n.distinct)
                          : call(function_name(name), std::move(args));
     }

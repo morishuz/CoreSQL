@@ -27,6 +27,9 @@ def main():
         subprocess.run(base + ['-B', str(consumer)], check=True)
         subprocess.run(['cmake', '--build', str(consumer), '--config', args.config, '-j', '2'], check=True)
         subprocess.run(['ctest', '--test-dir', str(consumer), '-C', args.config, '--output-on-failure'], check=True)
+        # Register and reopen the documented custom type with the installed library.
+        for _ in range(2):
+            subprocess.run([str(consumer / 'package_custom_type'), str(work / 'custom.core')], check=True)
         for name, option in [('version', '-DCORESQL_TEST_VERSION=999.0.0'), ('component', '-DCORESQL_TEST_COMPONENTS=missing')]:
             result = subprocess.run(base + ['-B', str(work / name), option], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             if result.returncode == 0:

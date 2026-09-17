@@ -1,7 +1,5 @@
 #include "ast.hpp"
 #include "membership.hpp"
-#include "coresql/date.hpp"
-#include "coresql/decimal.hpp"
 #include "coresql/encoding.hpp"
 #include <bit>
 #include <cmath>
@@ -58,28 +56,12 @@ Value pack(const Value& value) {
     return Opaque(any_type(), std::move(b));
 }
 std::string function_name(const std::string& op) {
-    static const std::map<std::string, std::string> names = {{"is_null", "sql.is_null"},
-                                                             {"abs", "sql.numeric_abs"},
-                                                             {"length", "text.length"},
-                                                             {"like", "text.like_ascii"},
-                                                             {"+", "sql.numeric_add"},
-                                                             {"*", "sql.numeric_multiply"},
-                                                             {"&", "sql.numeric_bitand"},
-                                                             {"and", "integer.and"},
-                                                             {"||", "sql.concat"},
-                                                             {"-", "sql.numeric_subtract"},
-                                                             {"/", "sql.numeric_divide"},
-                                                             {"%", "sql.numeric_remainder"},
-                                                             {"=", "sql.equal"},
-                                                             {"==", "sql.equal"},
-                                                             {"!=", "sql.not_equal"},
-                                                             {"<>", "sql.not_equal"},
-                                                             {"<", "sql.less"},
-                                                             {">", "sql.greater"},
-                                                             {"<=", "sql.less_equal"},
-                                                             {">=", "sql.greater_equal"},
-                                                             {"or", "sql.or"},
-                                                             {"not", "sql.not"}};
+    static const std::map<std::string, std::string> names = {
+        {"is_null", "sql.is_null"},  {"length", "text.length"}, {"like", "text.like_ascii"},
+        {"and", "integer.and"},      {"||", "sql.concat"},      {"=", "sql.equal"},
+        {"==", "sql.equal"},         {"!=", "sql.not_equal"},   {"<>", "sql.not_equal"},
+        {"<", "sql.less"},           {">", "sql.greater"},      {"<=", "sql.less_equal"},
+        {">=", "sql.greater_equal"}, {"or", "sql.or"},          {"not", "sql.not"}};
     auto it = names.find(op);
     return it == names.end() ? op : it->second;
 }
@@ -109,10 +91,10 @@ int value_compare(const Value& input_a, const Value& input_b, const Registry& r)
     return a.index() < b.index() ? -1 : 1;
 }
 } // namespace
-void install(Registry& r) {
+void install(Registry& r, const TypeAdapters& adapters) {
     detail::install_string_functions(r);
-    dates::install(r);
-    decimals::install(r);
+    detail::install_scalar_policy(r);
+    adapters.install(r);
     Registry comparisons = r;
     TypeAddon any;
     any.id = detail::any_type().id;
@@ -133,8 +115,8 @@ void install(Registry& r) {
             throw Error(ErrorCode::type, "Expected two integers");
         return integer();
     };
-    detail::install_coercions(r);
-    detail::install_decimal_coercions(r);
+    detail::install_coercions(r, adapters);
+    detail::install_type_conversions(r, adapters);
     comparisons = r;
     for (std::string op : {"equal", "not_equal", "less", "greater", "less_equal", "greater_equal"}) {
         Function function{
@@ -163,16 +145,16 @@ void install(Registry& r) {
             function.prepare_membership = detail::membership_factory(comparisons);
         r.add(std::move(function));
     }
-    for (auto [name, type] : {std::pair{"numeric", integer()}, {"text", text()}}) {
-        Function function{"sql.equal_" + std::string(name),
+    for (const auto& type : {integer(), real(), text()}) {
+        Function function{detail::affinity_function(type, true),
                           [](std::span<const Type> t) {
                               if (t.size() != 2 || !detail::scalar_type(t[0]) || !detail::scalar_type(t[1]))
                                   throw Error(ErrorCode::type, "Affinity comparison needs SQL scalars");
                               return integer();
                           },
-                          [type, comparisons](std::span<const Value> values) -> Value {
-                              return std::int64_t(value_compare(detail::affinity(values[0], type),
-                                                                detail::affinity(values[1], type),
+                          [type, comparisons, adapters](std::span<const Value> values) -> Value {
+                              return std::int64_t(value_compare(detail::affinity(values[0], type, adapters),
+                                                                detail::affinity(values[1], type, adapters),
                                                                 comparisons) == 0);
                           }};
         function.prepare_membership = detail::membership_factory(comparisons, type);

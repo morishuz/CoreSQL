@@ -5,7 +5,7 @@
 #include <array>
 using namespace coresql;
 int main(){return tests([]{
-    Registry registry;timestamps::install(registry);vectors::install(registry);
+    Registry registry;timestamps::install(registry);
     registry.add(Function{"fail",[](std::span<const Type> t){CHECK(t.empty());return integer();},[](std::span<const Value>)->Value{throw Error(ErrorCode::constraint,"Callback failure");}});
     sql::install(registry);Database db(registry);auto tx=db.begin();
     tx.create_table("l",{{"id",integer()},{"stamp",timestamps::type()}});

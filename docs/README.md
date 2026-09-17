@@ -12,6 +12,7 @@
 ## Extend CoreSQL
 
 - [Type, function, aggregate and index contracts](contracts/extensions.md)
+- [Add a backend and SQL type](extensions/custom-type.md)
 - [JSON key extraction](extensions/json.md)
 - [Graph extension](extensions/graph.md)
 

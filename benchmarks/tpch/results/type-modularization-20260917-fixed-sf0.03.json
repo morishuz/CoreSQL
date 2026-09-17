@@ -1,0 +1,739 @@
+{
+  "purpose": "Single-thread in-memory client latency; not official TPC-H",
+  "created_utc": "2026-09-17T12:28:36.966957+00:00",
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "python": "3.14.2",
+  "cpu": "Apple M1",
+  "host_memory_bytes": 17179869184,
+  "coresql_commit": "d4982285738cf609bb27804cbb76ad760aec7753",
+  "bridge_sha256": "5544bbaede7418544354734a788e823bc52a4ee1dffb2a2e52578ee5a3a028bc",
+  "worktree_source_sha256": "bf8ad627dd50898dcdb6ed465edc8ba67846edd669b16c1ca083a8fe67410150",
+  "worktree_dirty": true,
+  "driver_sha256": "90caaf9a6826958a265a1eadd05c2d0e7bcf74a15b2caf47f22a56a1510769e3",
+  "duckdb_version": "1.5.5",
+  "duckdb_revision": "d8cdaa33fd",
+  "scale": "0.03",
+  "dataset_manifest_sha256": "8f5ed9ad0fb37eef810d106a987ef8b75db9571954a8a860599fe32e0e22f996",
+  "query_revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+  "threads_per_engine": 1,
+  "repeats": 3,
+  "warmups": 1,
+  "query_timeout_seconds": 15,
+  "load_timeout_seconds": 120,
+  "group_rss_limit_mb": 2048,
+  "timing_scope": "SQL text to fetched Python rows; includes parsing/binding/materialization. CoreSQL additionally includes bridge serialization/IPC/decoding. No persistent prepared statements.",
+  "memory_scope": "Peak sampled process-group RSS, including Python driver and loading, at approximately 100ms intervals; may miss brief peaks.",
+  "schema": "Identical native DATE/DECIMAL input; no indexes or constraints; in-memory; DuckDB memory_limit 1GB and no disk spill.",
+  "selected_queries": [
+    "q01.sql",
+    "q02.sql",
+    "q03.sql",
+    "q04.sql",
+    "q05.sql",
+    "q06.sql",
+    "q07.sql",
+    "q08.sql",
+    "q09.sql",
+    "q10.sql",
+    "q11.sql",
+    "q12.sql",
+    "q13.sql",
+    "q14.sql",
+    "q15.sql",
+    "q16.sql",
+    "q17.sql",
+    "q18.sql",
+    "q19.sql",
+    "q20.sql",
+    "q21.sql",
+    "q22.sql"
+  ],
+  "results": [
+    {
+      "query": "q01.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.206070791999082,
+        "phase": "done",
+        "seconds": [
+          0.006068500000765198,
+          0.006156166000437224,
+          0.006312249999609776
+        ],
+        "median_seconds": 0.006156166000437224,
+        "peak_group_rss_bytes": 369557504,
+        "correctness": "match",
+        "row_count": 4
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.3289721670007566,
+        "phase": "done",
+        "seconds": [
+          0.18197029199836834,
+          0.18157608300134598,
+          0.1825977080006851
+        ],
+        "median_seconds": 0.18197029199836834,
+        "peak_group_rss_bytes": 644988928,
+        "correctness": "match",
+        "row_count": 4
+      }
+    },
+    {
+      "query": "q02.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.228841583999383,
+        "phase": "done",
+        "seconds": [
+          0.0021533330000238493,
+          0.0017805000006774208,
+          0.001742041000397876
+        ],
+        "median_seconds": 0.0017805000006774208,
+        "peak_group_rss_bytes": 368001024,
+        "correctness": "match",
+        "row_count": 13
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.216145458000028,
+        "phase": "done",
+        "seconds": [
+          0.02099899999848276,
+          0.020214291000229423,
+          0.019720750000487897
+        ],
+        "median_seconds": 0.020214291000229423,
+        "peak_group_rss_bytes": 671940608,
+        "correctness": "match",
+        "row_count": 13
+      }
+    },
+    {
+      "query": "q03.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.246770042000207,
+        "phase": "done",
+        "seconds": [
+          0.0015022919997136341,
+          0.0014469999987340998,
+          0.0014110000010987278
+        ],
+        "median_seconds": 0.0014469999987340998,
+        "peak_group_rss_bytes": 368148480,
+        "correctness": "match",
+        "row_count": 10
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.229983875000471,
+        "phase": "done",
+        "seconds": [
+          0.03253187500013155,
+          0.03235237499939103,
+          0.0334200420002162
+        ],
+        "median_seconds": 0.03253187500013155,
+        "peak_group_rss_bytes": 653754368,
+        "correctness": "match",
+        "row_count": 10
+      }
+    },
+    {
+      "query": "q04.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.208266957999513,
+        "phase": "done",
+        "seconds": [
+          0.0023179590007202933,
+          0.0018977500003529713,
+          0.0018358750003244495
+        ],
+        "median_seconds": 0.0018977500003529713,
+        "peak_group_rss_bytes": 368312320,
+        "correctness": "match",
+        "row_count": 5
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2502816670003085,
+        "phase": "done",
+        "seconds": [
+          0.01958254199962539,
+          0.01942366699950071,
+          0.020537708000119892
+        ],
+        "median_seconds": 0.01958254199962539,
+        "peak_group_rss_bytes": 651444224,
+        "correctness": "match",
+        "row_count": 5
+      }
+    },
+    {
+      "query": "q05.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.15656562499862,
+        "phase": "done",
+        "seconds": [
+          0.0022370829992723884,
+          0.0022439999993366655,
+          0.002314332999958424
+        ],
+        "median_seconds": 0.0022439999993366655,
+        "peak_group_rss_bytes": 367706112,
+        "correctness": "match",
+        "row_count": 5
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2144177919999493,
+        "phase": "done",
+        "seconds": [
+          0.03891687500072294,
+          0.03632137499880628,
+          0.037000624999564025
+        ],
+        "median_seconds": 0.037000624999564025,
+        "peak_group_rss_bytes": 677052416,
+        "correctness": "match",
+        "row_count": 5
+      }
+    },
+    {
+      "query": "q06.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.383834083000693,
+        "phase": "done",
+        "seconds": [
+          0.0005501249997905688,
+          0.0005202910015214002,
+          0.0004937920002703322
+        ],
+        "median_seconds": 0.0005202910015214002,
+        "peak_group_rss_bytes": 368295936,
+        "correctness": "match",
+        "row_count": 1
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.220239207999839,
+        "phase": "done",
+        "seconds": [
+          0.027719417001208058,
+          0.027818166001452482,
+          0.028146541000751313
+        ],
+        "median_seconds": 0.027818166001452482,
+        "peak_group_rss_bytes": 644759552,
+        "correctness": "match",
+        "row_count": 1
+      }
+    },
+    {
+      "query": "q07.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.132776333000947,
+        "phase": "done",
+        "seconds": [
+          0.0029036670002824394,
+          0.003059458998905029,
+          0.0026269579993822845
+        ],
+        "median_seconds": 0.0029036670002824394,
+        "peak_group_rss_bytes": 368148480,
+        "correctness": "match",
+        "row_count": 4
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2365729159992043,
+        "phase": "done",
+        "seconds": [
+          0.06208549999973911,
+          0.0577253749997908,
+          0.05931645900091098
+        ],
+        "median_seconds": 0.05931645900091098,
+        "peak_group_rss_bytes": 687144960,
+        "correctness": "match",
+        "row_count": 4
+      }
+    },
+    {
+      "query": "q08.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.301859666000382,
+        "phase": "done",
+        "seconds": [
+          0.0028343750000203727,
+          0.0027997500001220033,
+          0.002752124999460648
+        ],
+        "median_seconds": 0.0027997500001220033,
+        "peak_group_rss_bytes": 371769344,
+        "correctness": "match",
+        "row_count": 2
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.231055666999964,
+        "phase": "done",
+        "seconds": [
+          0.022216833000129554,
+          0.022699333998389193,
+          0.022245665999435005
+        ],
+        "median_seconds": 0.022245665999435005,
+        "peak_group_rss_bytes": 658456576,
+        "correctness": "match",
+        "row_count": 2
+      }
+    },
+    {
+      "query": "q09.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.230009541999607,
+        "phase": "done",
+        "seconds": [
+          0.005555542000365676,
+          0.005298000000038883,
+          0.005044833000283688
+        ],
+        "median_seconds": 0.005298000000038883,
+        "peak_group_rss_bytes": 368295936,
+        "correctness": "match",
+        "row_count": 175
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2346168749991193,
+        "phase": "done",
+        "seconds": [
+          0.05881162500008941,
+          0.05909237500054587,
+          0.05690116599907924
+        ],
+        "median_seconds": 0.05881162500008941,
+        "peak_group_rss_bytes": 670597120,
+        "correctness": "match",
+        "row_count": 175
+      }
+    },
+    {
+      "query": "q10.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.218274083001234,
+        "phase": "done",
+        "seconds": [
+          0.004397374999825843,
+          0.0041077499990933575,
+          0.004186916999969981
+        ],
+        "median_seconds": 0.004186916999969981,
+        "peak_group_rss_bytes": 368263168,
+        "correctness": "match",
+        "row_count": 20
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.255756874999861,
+        "phase": "done",
+        "seconds": [
+          0.025550082998961443,
+          0.025109750000410713,
+          0.026183417001448106
+        ],
+        "median_seconds": 0.025550082998961443,
+        "peak_group_rss_bytes": 652181504,
+        "correctness": "match",
+        "row_count": 20
+      }
+    },
+    {
+      "query": "q11.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.400480542000878,
+        "phase": "done",
+        "seconds": [
+          0.03357266700004402,
+          0.0022083749990997603,
+          0.001763083000696497
+        ],
+        "median_seconds": 0.0022083749990997603,
+        "peak_group_rss_bytes": 368099328,
+        "correctness": "match",
+        "row_count": 1034
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2307810000002064,
+        "phase": "done",
+        "seconds": [
+          0.03466216699962388,
+          0.005651792000207934,
+          0.00454070799969486
+        ],
+        "median_seconds": 0.005651792000207934,
+        "peak_group_rss_bytes": 647643136,
+        "correctness": "match",
+        "row_count": 1034
+      }
+    },
+    {
+      "query": "q12.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.244265459001326,
+        "phase": "done",
+        "seconds": [
+          0.00376966700059711,
+          0.0038343340002029436,
+          0.0034907919998659054
+        ],
+        "median_seconds": 0.00376966700059711,
+        "peak_group_rss_bytes": 368246784,
+        "correctness": "match",
+        "row_count": 2
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.229153666001366,
+        "phase": "done",
+        "seconds": [
+          0.02651249999871652,
+          0.02568833399891446,
+          0.026545708999037743
+        ],
+        "median_seconds": 0.02651249999871652,
+        "peak_group_rss_bytes": 648658944,
+        "correctness": "match",
+        "row_count": 2
+      }
+    },
+    {
+      "query": "q13.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.209359665999727,
+        "phase": "done",
+        "seconds": [
+          0.005458749999888823,
+          0.005043291999754729,
+          0.004836375001104898
+        ],
+        "median_seconds": 0.005043291999754729,
+        "peak_group_rss_bytes": 367935488,
+        "correctness": "match",
+        "row_count": 36
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.213525541999843,
+        "phase": "done",
+        "seconds": [
+          0.03991725000014412,
+          0.03692720799881499,
+          0.03938412500065169
+        ],
+        "median_seconds": 0.03938412500065169,
+        "peak_group_rss_bytes": 676855808,
+        "correctness": "match",
+        "row_count": 36
+      }
+    },
+    {
+      "query": "q14.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.284722624999631,
+        "phase": "done",
+        "seconds": [
+          0.0010301669990440132,
+          0.0009862500010058284,
+          0.0009402499999850988
+        ],
+        "median_seconds": 0.0009862500010058284,
+        "peak_group_rss_bytes": 369410048,
+        "correctness": "match",
+        "row_count": 1
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.231863416000124,
+        "phase": "done",
+        "seconds": [
+          0.020837584001128562,
+          0.02097758300078567,
+          0.021026915999755147
+        ],
+        "median_seconds": 0.02097758300078567,
+        "peak_group_rss_bytes": 645726208,
+        "correctness": "match",
+        "row_count": 1
+      }
+    },
+    {
+      "query": "q15.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.241646832999322,
+        "phase": "done",
+        "seconds": [
+          0.0009863750001386506,
+          0.0009222499993484234,
+          0.0008990409987745807
+        ],
+        "median_seconds": 0.0009222499993484234,
+        "peak_group_rss_bytes": 368132096,
+        "correctness": "match",
+        "row_count": 1
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2556757909987937,
+        "phase": "done",
+        "seconds": [
+          0.020818999999391963,
+          0.02107270799933758,
+          0.020565124999848194
+        ],
+        "median_seconds": 0.020818999999391963,
+        "peak_group_rss_bytes": 645087232,
+        "correctness": "match",
+        "row_count": 1
+      }
+    },
+    {
+      "query": "q16.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.282996124999045,
+        "phase": "done",
+        "seconds": [
+          0.0018194999993284,
+          0.0021854169990547234,
+          0.0017066250002244487
+        ],
+        "median_seconds": 0.0018194999993284,
+        "peak_group_rss_bytes": 368082944,
+        "correctness": "match",
+        "row_count": 850
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2312833329997375,
+        "phase": "done",
+        "seconds": [
+          0.007961666000483092,
+          0.0077049169995007105,
+          0.008018375001483946
+        ],
+        "median_seconds": 0.007961666000483092,
+        "peak_group_rss_bytes": 643710976,
+        "correctness": "match",
+        "row_count": 850
+      }
+    },
+    {
+      "query": "q17.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.300423500000761,
+        "phase": "done",
+        "seconds": [
+          0.001833833999626222,
+          0.0015574999997625127,
+          0.0013807079994876403
+        ],
+        "median_seconds": 0.0015574999997625127,
+        "peak_group_rss_bytes": 367771648,
+        "correctness": "match",
+        "row_count": 1
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2274691250004253,
+        "phase": "done",
+        "seconds": [
+          0.01616387499962002,
+          0.013508957999874838,
+          0.013608040999315563
+        ],
+        "median_seconds": 0.013608040999315563,
+        "peak_group_rss_bytes": 651526144,
+        "correctness": "match",
+        "row_count": 1
+      }
+    },
+    {
+      "query": "q18.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.325875083000938,
+        "phase": "done",
+        "seconds": [
+          0.004304582998884143,
+          0.0038380419991881354,
+          0.0035144160010531778
+        ],
+        "median_seconds": 0.0038380419991881354,
+        "peak_group_rss_bytes": 368263168,
+        "correctness": "match",
+        "row_count": 2
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.3927112910005235,
+        "phase": "done",
+        "seconds": [
+          0.06309691699971154,
+          0.06232104199989408,
+          0.06021612499898765
+        ],
+        "median_seconds": 0.06232104199989408,
+        "peak_group_rss_bytes": 675872768,
+        "correctness": "match",
+        "row_count": 2
+      }
+    },
+    {
+      "query": "q19.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.78665650000039,
+        "phase": "done",
+        "seconds": [
+          0.005668583000442595,
+          0.005681374999767286,
+          0.005986416001178441
+        ],
+        "median_seconds": 0.005681374999767286,
+        "peak_group_rss_bytes": 370917376,
+        "correctness": "match",
+        "row_count": 1
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2727852500011068,
+        "phase": "done",
+        "seconds": [
+          0.014268707998780883,
+          0.014375499999005115,
+          0.014547834000040893
+        ],
+        "median_seconds": 0.014375499999005115,
+        "peak_group_rss_bytes": 645218304,
+        "correctness": "match",
+        "row_count": 1
+      }
+    },
+    {
+      "query": "q20.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.6976987500002,
+        "phase": "done",
+        "seconds": [
+          0.0019615840010374086,
+          0.0023575410014018416,
+          0.001969916998859844
+        ],
+        "median_seconds": 0.001969916998859844,
+        "peak_group_rss_bytes": 368115712,
+        "correctness": "match",
+        "row_count": 5
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2434756670008937,
+        "phase": "done",
+        "seconds": [
+          0.013196916999731911,
+          0.01300637500025914,
+          0.012516999999206746
+        ],
+        "median_seconds": 0.01300637500025914,
+        "peak_group_rss_bytes": 652247040,
+        "correctness": "match",
+        "row_count": 5
+      }
+    },
+    {
+      "query": "q21.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.351457500000834,
+        "phase": "done",
+        "seconds": [
+          0.004536458000075072,
+          0.005437041998447967,
+          0.004590000000462169
+        ],
+        "median_seconds": 0.004590000000462169,
+        "peak_group_rss_bytes": 370688000,
+        "correctness": "match",
+        "row_count": 6
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2304792499999166,
+        "phase": "done",
+        "seconds": [
+          0.5968244160012546,
+          0.5835854169999948,
+          0.5802364589999343
+        ],
+        "median_seconds": 0.5835854169999948,
+        "peak_group_rss_bytes": 778190848,
+        "correctness": "match",
+        "row_count": 6
+      }
+    },
+    {
+      "query": "q22.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.178572417000396,
+        "phase": "done",
+        "seconds": [
+          0.00187470900164044,
+          0.0017409169995517004,
+          0.0012892909999209223
+        ],
+        "median_seconds": 0.0017409169995517004,
+        "peak_group_rss_bytes": 373260288,
+        "correctness": "match",
+        "row_count": 7
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 3.2237835000014456,
+        "phase": "done",
+        "seconds": [
+          0.007827375000488246,
+          0.00843170899861434,
+          0.008166582998455851
+        ],
+        "median_seconds": 0.008166582998455851,
+        "peak_group_rss_bytes": 646692864,
+        "correctness": "match",
+        "row_count": 7
+      }
+    }
+  ],
+  "engine_order": [
+    "duckdb",
+    "coresql"
+  ]
+}

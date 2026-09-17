@@ -240,7 +240,8 @@ library/adapter fingerprints and explicit engine order. The raw field
 CoreSQL speedup, below 1 means CoreSQL is slower. The three drivers have different
 result-conversion overhead, so this remains a client-latency comparison.
 
-See [the retained three-engine table](results/OPTIMIZATION_ROUND2.md).
+See [the retained three-engine table](results/OPTIMIZATION_ROUND2.md) and the
+[type-adapter regression fixes](results/TYPE_MODULARIZATION_FIXES_20260917.md).
 
 ### Inspect execution work
 

@@ -8,7 +8,7 @@ CoreSQL explores a simple idea: a database should be small enough to understand
 and structured enough to extend. It combines a typed relational core, optional
 SQL, and durable local files. It has no SQLite runtime dependency.
 
-- **Small and readable.** About 10,000 lines across the engine, SQL frontend,
+- **Small and readable.** About 11,000 lines across the engine, SQL frontend,
   public headers and bundled add-ons, including comments and blank lines;
   tests and external reference code are separate.
 - **Clear boundaries.** Storage and transactions belong to the core. SQL parsing
@@ -16,7 +16,8 @@ SQL, and durable local files. It has no SQLite runtime dependency.
 - **Extensible by design.** Register types, scalar functions, aggregates and index
   providers. Even built-in integer, real and text types use the type-extension API.
   Bundled add-ons include JSON, vectors, dates, decimals, timestamps, spatial boxes
-  and an experimental graph API.
+  and an experimental graph API. Integer, real, text, DATE, DECIMAL and VECTOR use
+  shared SQL adapters for declarations, conversions and type-specific operations.
 
 Extensions are trusted, linked C++ code, not sandboxed or dynamically loaded
 plugins. The storage engine, transaction model and query operators remain part of

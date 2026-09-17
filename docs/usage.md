@@ -70,7 +70,7 @@ coresql_admin import-snapshot old-export.snapshot migrated.core
 `Database::restore(snapshot, destination, registry)` provides the same operation
 for applications. It preserves schema, defaults, index declarations and hidden row
 identities. `save()` alone is an export, not a synchronized durable backup.
-The admin tool installs builtin SQL/date/decimal types. For other add-ons use the
+The admin tool installs builtin SQL/date/decimal/vector types. For other add-ons use the
 C++ methods with the full application registry.
 
 All destinations must be new paths. If backup/restore fails or is interrupted, the

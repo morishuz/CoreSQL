@@ -1,12 +1,12 @@
 #include "ast.hpp"
-#include "coresql/date.hpp"
 #include <set>
 
 namespace coresql::sql::detail {
 Result execute(Transaction& tx, const Statement& s, const Registry& registry,
-               std::span<const Value> parameters) {
+               std::span<const Value> parameters, const TypeAdapters& adapters) {
     auto schema = tx.schema();
     Lowerer lower{schema, registry, parameters, {}};
+    lower.types = &adapters;
     auto select = [&](const Select& query) -> coresql::Result { return tx.query(lower.query(query)); };
     if (s.kind == Statement::select) {
         std::vector<Column> output;
@@ -35,7 +35,7 @@ Result execute(Transaction& tx, const Statement& s, const Registry& registry,
         c.nullable = f.nullable && !f.primary;
         if (f.value) {
             auto v = evaluate_constant(lower.stored_expression(*f.value, f.type), registry);
-            c.default_value = convert(std::move(v), f.type);
+            c.default_value = convert(std::move(v), f.type, false, adapters);
         }
         if (c.nullable && !c.default_value)
             c.default_value = Null(c.type);
@@ -105,7 +105,7 @@ Result execute(Transaction& tx, const Statement& s, const Registry& registry,
         tx.vacuum();
         break;
     case Statement::insert:
-        result = insert(tx, s, registry, parameters);
+        result = insert(tx, s, registry, parameters, adapters);
         break;
     case Statement::update:
     case Statement::erase: {
@@ -130,11 +130,8 @@ Result execute(Transaction& tx, const Statement& s, const Registry& registry,
                 if (e.kind == Expr::Kind::literal && is_null(e.value))
                     e.value = Null(column->type);
                 auto source = lower.expression_type(e);
-                if (source && *source != column->type && convertible(*source, column->type)) {
-                    if (column->type == dates::type())
-                        e = call("sql.store_date", {std::move(e)});
-                    else
-                        e = lower.conversion(std::move(e), column->type);
+                if (source && *source != column->type && convertible(*source, column->type, adapters)) {
+                    e = lower.conversion(std::move(e), column->type);
                 }
                 assignments.push_back({name, std::move(e)});
             }
@@ -151,14 +148,17 @@ Result execute(Transaction& tx, const Statement& s, const Registry& registry,
 }
 } // namespace coresql::sql::detail
 namespace coresql::sql {
-Connection::Connection(Database& db, const Registry& registry) : database_(db), registry_(registry) {
+Connection::Connection(Database& db, const Registry& registry, const TypeAdapters& adapters)
+    : database_(db), registry_(registry), adapters_(adapters) {
 }
 Result Connection::execute(std::string_view text, std::span<const Value> parameters) {
-    return execute(Statement(text), parameters);
+    return execute(Statement(text, adapters_), parameters);
 }
 Result Connection::execute(const Statement& statement, std::span<const Value> parameters) {
     if (!statement.parsed_)
         throw Error(ErrorCode::state, "SQL statement was moved from");
+    if (!adapters_.same_configuration(statement.adapters_))
+        throw Error(ErrorCode::type, "SQL statement and connection use different type adapters");
     const auto& s = *statement.parsed_;
     if (parameters.size() != s.parameters)
         throw Error(ErrorCode::type, "SQL parameter count differs");
@@ -227,10 +227,10 @@ Result Connection::execute(const Statement& statement, std::span<const Value> pa
         throw Error(ErrorCode::state, "VACUUM inside transaction is unsupported");
     Result result;
     if (transaction_)
-        result = detail::execute(*transaction_, s, registry_, parameters);
+        result = detail::execute(*transaction_, s, registry_, parameters, adapters_);
     else {
         auto tx = database_.begin();
-        result = detail::execute(tx, s, registry_, parameters);
+        result = detail::execute(tx, s, registry_, parameters, adapters_);
         tx.commit();
     }
     for (auto& row : result.rows)

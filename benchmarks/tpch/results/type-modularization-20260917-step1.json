@@ -1,0 +1,131 @@
+{
+  "purpose": "Single-thread in-memory client latency; not official TPC-H",
+  "created_utc": "2026-09-17T12:21:44.690757+00:00",
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "python": "3.14.2",
+  "cpu": "Apple M1",
+  "host_memory_bytes": 17179869184,
+  "coresql_commit": "d4982285738cf609bb27804cbb76ad760aec7753",
+  "bridge_sha256": "a743ea8bca1c00645de68a286f2eda09c3f764b0cd5f981067a3d880ea8a0367",
+  "worktree_source_sha256": "dce6deaa2f0336f3cd114e13c043d417354ee2525440aa11ada040b4101b2e00",
+  "worktree_dirty": true,
+  "driver_sha256": "90caaf9a6826958a265a1eadd05c2d0e7bcf74a15b2caf47f22a56a1510769e3",
+  "duckdb_version": "1.5.5",
+  "duckdb_revision": "d8cdaa33fd",
+  "scale": "0.03",
+  "dataset_manifest_sha256": "8f5ed9ad0fb37eef810d106a987ef8b75db9571954a8a860599fe32e0e22f996",
+  "query_revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+  "threads_per_engine": 1,
+  "repeats": 3,
+  "warmups": 1,
+  "query_timeout_seconds": 15,
+  "load_timeout_seconds": 120,
+  "group_rss_limit_mb": 2048,
+  "timing_scope": "SQL text to fetched Python rows; includes parsing/binding/materialization. CoreSQL additionally includes bridge serialization/IPC/decoding. No persistent prepared statements.",
+  "memory_scope": "Peak sampled process-group RSS, including Python driver and loading, at approximately 100ms intervals; may miss brief peaks.",
+  "schema": "Identical native DATE/DECIMAL input; no indexes or constraints; in-memory; DuckDB memory_limit 1GB and no disk spill.",
+  "selected_queries": [
+    "q07.sql",
+    "q08.sql",
+    "q09.sql"
+  ],
+  "results": [
+    {
+      "query": "q07.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.512123290999625,
+        "phase": "done",
+        "seconds": [
+          0.002845750000233238,
+          0.002663458000824903,
+          0.002607583000099112
+        ],
+        "median_seconds": 0.002663458000824903,
+        "peak_group_rss_bytes": 368295936,
+        "correctness": "match",
+        "row_count": 4
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 5.65519624999979,
+        "phase": "done",
+        "seconds": [
+          0.06187374999990425,
+          0.05763854100041499,
+          0.060484833999908005
+        ],
+        "median_seconds": 0.060484833999908005,
+        "peak_group_rss_bytes": 686915584,
+        "correctness": "match",
+        "row_count": 4
+      }
+    },
+    {
+      "query": "q08.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.343383750000612,
+        "phase": "done",
+        "seconds": [
+          0.0028347500001473236,
+          0.002579291999609268,
+          0.0031197500002235756
+        ],
+        "median_seconds": 0.0028347500001473236,
+        "peak_group_rss_bytes": 368295936,
+        "correctness": "match",
+        "row_count": 2
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 5.593735207999998,
+        "phase": "done",
+        "seconds": [
+          0.023144084000705334,
+          0.02387941699998919,
+          0.02221525000004476
+        ],
+        "median_seconds": 0.023144084000705334,
+        "peak_group_rss_bytes": 658292736,
+        "correctness": "match",
+        "row_count": 2
+      }
+    },
+    {
+      "query": "q09.sql",
+      "duckdb": {
+        "status": "ok",
+        "load_seconds": 9.410018458000195,
+        "phase": "done",
+        "seconds": [
+          0.005642999999508902,
+          0.005012665999856836,
+          0.005031124999732128
+        ],
+        "median_seconds": 0.005031124999732128,
+        "peak_group_rss_bytes": 368214016,
+        "correctness": "match",
+        "row_count": 175
+      },
+      "coresql": {
+        "status": "ok",
+        "load_seconds": 5.37826537500041,
+        "phase": "done",
+        "seconds": [
+          0.06034312500014494,
+          0.055661624999629566,
+          0.05793124999945576
+        ],
+        "median_seconds": 0.05793124999945576,
+        "peak_group_rss_bytes": 670777344,
+        "correctness": "match",
+        "row_count": 175
+      }
+    }
+  ],
+  "engine_order": [
+    "duckdb",
+    "coresql"
+  ]
+}

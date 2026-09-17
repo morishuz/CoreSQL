@@ -16,7 +16,7 @@ are not part of the supported dialect until implemented and validated.
 #include "coresql/sql.hpp"
 using namespace coresql;
 Registry registry;
-// Install domain extensions before SQL if their comparison functions are needed.
+// Defaults include scalar SQL policy and the DATE, DECIMAL and VECTOR add-ons.
 sql::install(registry);
 Database db(registry);
 sql::Connection connection(db, registry);
@@ -62,7 +62,7 @@ do not reproduce all SQLite reuse behavior.
 
 ## Supported SQL
 
-- CREATE TABLE with INTEGER/INT/BIGINT, REAL, TEXT/VARCHAR, DATE, DECIMAL, or undeclared columns;
+- CREATE TABLE with INTEGER/INT/BIGINT, REAL, TEXT/VARCHAR, DATE, DECIMAL, VECTOR, or undeclared columns;
   nullable columns, inline primary/unique keys and defaults. CREATE INDEX supports
   multiple ordered columns. ALTER TABLE ADD COLUMN, INSERT/REPLACE VALUES or
   SELECT, UPDATE, DELETE, and explicit transactions are supported.
@@ -139,7 +139,9 @@ remain outside this batch.
 
 Conversion belongs to the optional SQL module. Native core writes, expression
 binding and extension types retain their strict type contracts. `sql/coercion.cpp`
-contains scalar conversion adapters; `sql/decimal.cpp` handles decimal SQL contexts; `sql/typing.cpp` handles SQL
+contains scalar conversion adapters; `sql/type_lowering.cpp` dispatches extension
+policy through the [SQL type adapters](extensions.md#sql-type-adapters);
+`sql/typing.cpp` handles SQL
 result-type inspection and mixed result arms. No SQL type IDs or conversion rules
 are embedded in the core.
 
@@ -215,8 +217,8 @@ results require an explicit cast. Undeclared columns still store only the origin
 integer/real/text scalar classes. Interval arithmetic, timestamp conversion and
 calendar extraction are not implemented yet.
 
-`sql::install` installs the date and decimal add-ons as well as SQL semantics; do not install
-it separately in that registry. C++ applications without SQL can link
+`sql::install` installs date, decimal and vector add-ons as well as SQL semantics;
+do not also install those add-ons separately in that registry. C++ applications without SQL can link
 `CoreSQL::date` and call `dates::install`. SQL results retain native DATE values;
 use `dates::format` to display them. The SQL CLI displays ISO dates directly.
 
@@ -442,3 +444,28 @@ names and returns column metadata. REPLACE returns only the inserted row, not
 rows removed by conflicts. Rows are materialized; the statement rolls back if
 insertion or RETURNING construction fails. Values returned inside an explicit
 transaction are provisional until its commit succeeds.
+
+## Vector SQL adapter
+
+The default SQL configuration supports `VECTOR` (variable length) and `VECTOR(n)`
+(exactly n elements, including zero). `VECTOR '[1,2]'`, `vector('[1,2]')` and
+`CAST('[1,2]' AS VECTOR(2))` construct finite float32 vectors. Text uses brackets
+and comma-separated numbers; surrounding whitespace is accepted. Malformed text,
+non-finite/out-of-range elements and dimension mismatches are errors. Assignment
+accepts this text format and checks/retypes vector values to the column dimensions.
+`CAST(v AS TEXT)` produces round-trippable bracketed float32 text.
+
+`vector_squared_l2(a,b)` uses the backend's double-accumulated squared L2 distance.
+Both inputs must be vectors of equal length; incompatible fixed dimensions fail
+binding, variable-length mismatches fail evaluation. NULL inputs yield NULL.
+Vectors support same-type equality but no ordering; order by distance instead.
+CASE/UNION combining different vector dimensions use the variable-length type.
+The C++ vector API and byte encoding are unchanged; SQL conversion is an adapter
+policy. There is no ANN index or implicit vector arithmetic.
+
+Scalar SQL policy lives in `addons/scalars/sql.cpp` and is registered through the
+same adapter interface as domain types. INTEGER/INT/BIGINT, REAL, TEXT and VARCHAR
+keep their existing conversion, numeric-text, mixed arithmetic and affinity
+semantics. NUMERIC remains a CAST-only dynamic SQL designation; undeclared columns
+still accept integer, real, text and NULL values. See the
+[adapter contract](extensions.md#sql-type-adapters) for composition and boundaries.

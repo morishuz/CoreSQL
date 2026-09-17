@@ -1,0 +1,25 @@
+{
+  "purpose": "Collect opt-in CoreSQL test-build counters under the benchmark safety guards.\n\nThis is a diagnostic run, not a timing measurement or independent answer check.\nRun measure.py separately with profiling disabled to validate and time results.\n",
+  "status": "ok",
+  "query": "q08.sql",
+  "scale": "0.03",
+  "dataset_manifest_sha256": "8f5ed9ad0fb37eef810d106a987ef8b75db9571954a8a860599fe32e0e22f996",
+  "query_revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+  "bridge_sha256": "4027291d3d63dfbf494588a2d0add34cf6a6cfba289dba6def9cfef92f83b4b2",
+  "limits": {
+    "query_seconds": 15,
+    "load_seconds": 120,
+    "group_rss_mib": 2048
+  },
+  "counters": {
+    "rows_tested": 66390,
+    "candidate_pairs": 15241,
+    "intermediate_rows": 28883,
+    "largest_intermediate": 13533,
+    "subquery_executions": 0,
+    "hash_build_rows": 198984,
+    "hash_probes": 15171,
+    "correlation_index_rows": 0,
+    "subquery_cache_hits": 0
+  }
+}

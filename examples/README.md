@@ -1,3 +1,10 @@
+# Custom backend and SQL type
+
+`coresql_custom_type [FILE]` demonstrates a complete CODE extension through
+`TypeAddon` and `SqlTypeAdapter`, including backend-only use, SQL casts/literals,
+a mapped function, NULLs and optional reopening. See the
+[walkthrough](../docs/extensions/custom-type.md) and [source](custom_type/main.cpp).
+
 # Persistent SQL and administration
 
 `coresql_persistent_sql FILE` demonstrates initialization, parameter binding, an

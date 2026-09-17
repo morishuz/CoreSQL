@@ -11,6 +11,7 @@ matching every feature of a mature database.
 - `sql/` parses and lowers SQL through the public core API. Core behavior must not
   depend on SQL syntax or coercion rules.
 - `addons/` implements domain types and behavior through public extension contracts.
+  Each provider has its own directory; see the [add-on map](../../addons/README.md).
   Add-ons do not publish transactions or manage durability.
 - `include/coresql/` exposes the embedding interfaces. API/ABI and permanent file
   compatibility remain experimental.

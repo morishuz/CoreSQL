@@ -1,5 +1,9 @@
 # Experimental release readiness
 
+Latest audit: [SQL type modularization, September 17, 2026](release-audit-20260917.md).
+The September 16 findings below are historical; the latest audit records the
+current public repository and CI status.
+
 Second audit: September 16, 2026, starting from `3e7b2f23d8` and including the
 configuration fix below. CoreSQL 0.1 remains an experimental source preview,
 not a production-ready or cross-platform-validated release. Installation,

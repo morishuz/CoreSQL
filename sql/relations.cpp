@@ -1,13 +1,21 @@
 #include "ast.hpp"
-#include "coresql/date.hpp"
-#include "coresql/decimal.hpp"
 #include <set>
 
 namespace coresql::sql::detail {
 bool Lowerer::repeatable(const Select& s) const {
+    // Nested SELECTs need their own scope. Analysis must not add captures to
+    // the query being lowered merely to discover operation argument types.
+    Lowerer local = *this;
+    auto bindings = captures ? *captures : std::vector<std::pair<std::string, Expr>>{};
+    if (captures)
+        local.captures = &bindings;
+    local.sources = s.sources;
+    local.qualified = s.sources.size() > 1;
+    for (auto& source : local.sources)
+        if (auto cte = ctes.find(source.table); cte != ctes.end())
+            source.table = cte->second;
     // SQL installs these names itself; arbitrary registered callbacks never opt in.
-    static const std::set<std::string> functions{"date.year",
-                                                 "text.substring",
+    static const std::set<std::string> functions{"text.substring",
                                                  "sum",
                                                  "avg",
                                                  "count",
@@ -20,8 +28,7 @@ bool Lowerer::repeatable(const Select& s) const {
                                                  "sql.cast_real",
                                                  "sql.cast_text",
                                                  "sql.cast_numeric",
-                                                 "sql.cast_date",
-                                                 "sql.cast_decimal"};
+                                                 "sql.cast_type"};
     for (const auto& source : s.sources) {
         auto name = source.table;
         if (auto cte = ctes.find(name); cte != ctes.end())
@@ -30,14 +37,32 @@ bool Lowerer::repeatable(const Select& s) const {
             return false;
         for (const auto& c : schema.at(name))
             if (c.type != integer() && c.type != real() && c.type != text() && c.type != any_type() &&
-                c.type != dates::type() && !decimals::is_decimal(c.type))
+                !(types->find(c.type) && types->find(c.type)->repeatable))
                 return false;
     }
     std::function<bool(const Node&)> safe = [&](const Node& n) {
-        if (n.kind == Node::function && !functions.contains(n.name))
+        if (n.kind == Node::function && n.name == "sql.cast_type" &&
+            !(types->find(type_of(n.value)) && types->find(type_of(n.value))->repeatable))
             return false;
-        if (n.query && !repeatable(*n.query))
-            return false;
+        if (n.kind == Node::function && !functions.contains(n.name)) {
+            std::vector<Expr> args;
+            for (const auto& arg : n.args) {
+                args.push_back(local.expression(arg));
+                if (!local.expression_type(args.back()))
+                    return false;
+            }
+            auto op = local.operation(n.name, args, n.args);
+            if (!op || !op->repeatable)
+                return false;
+        }
+        if (n.query) {
+            Lowerer nested = local;
+            std::vector<std::pair<std::string, Expr>> nested_bindings;
+            nested.outer = &local;
+            nested.captures = &nested_bindings;
+            if (!nested.repeatable(*n.query))
+                return false;
+        }
         return std::all_of(n.args.begin(), n.args.end(), safe);
     };
     auto optional = [&](const std::optional<Node>& n) { return !n || safe(*n); };
@@ -58,6 +83,7 @@ namespace coresql::sql::detail {
 Query Lowerer::query(const Select& input, std::vector<Column>* output) const {
     Schema expanded = schema;
     Lowerer context{expanded, registry, parameters, sources, outer, captures, qualified, parameter_types};
+    context.types = types;
     context.ctes = ctes;
     context.relation_id = relation_id;
     Select s = input;
