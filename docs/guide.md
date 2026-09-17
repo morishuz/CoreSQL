@@ -133,4 +133,4 @@ write amplification. Measure process memory separately.
 [Architecture](architecture/direction.md) explains the boundaries to preserve;
 the [SQL backlog](architecture/sql-roadmap.md) records remaining candidates.
 Use [benchmarks](../benchmarks/README.md) for reproduction and measured evidence,
-and [release readiness](release-readiness.md) for validation gates.
+and [contributor guidance](../CONTRIBUTING.md) for validation checks.

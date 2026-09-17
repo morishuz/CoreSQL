@@ -22,7 +22,6 @@
 - [Architecture](architecture/direction.md)
 - [SQL backlog](architecture/sql-roadmap.md)
 - [Benchmark methods and reproduction](../benchmarks/README.md)
-- [Release checklist, open findings and validation evidence](release-readiness.md)
 - [Provenance and external material](../PROVENANCE.md)
 
 Historical research, review diaries and intermediate measurements remain in the

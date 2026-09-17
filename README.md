@@ -114,7 +114,7 @@ ranking for close results; Q8 also showed variability in a separate check.
 
 [Guide](docs/guide.md) · [Examples](examples/README.md) ·
 [Architecture](docs/architecture/direction.md) · [Documentation](docs/README.md) ·
-[Contributing](CONTRIBUTING.md) · [Release readiness](docs/release-readiness.md)
+[Contributing](CONTRIBUTING.md)
 
 CoreSQL's original contributions use the [MIT license](LICENSE). External material
 retains its own notices. CoreSQL is independently maintained and is not affiliated
