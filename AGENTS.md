@@ -19,7 +19,10 @@ docs/architecture/direction.md for its contract and priorities.
 - Preserve original notices in third_party/ and tests/sqllogictest/upstream/.
   CoreSQL's LICENSE covers its original contributions; do not assert ownership
   over inherited material. Record adaptations in PROVENANCE.md.
-- Keep the GitHub repository private unless the owner explicitly authorizes a
-  visibility change. Do not rewrite published history without explicit approval.
+- Do not change repository visibility or rewrite published history without
+  explicit owner approval.
+- Keep temporary audit notes, profiles and intermediate benchmark results out of
+  the tracked source tree. Public documentation should describe the product, its
+  contracts, reproducible methods or required attribution.
 
 See CONTRIBUTING.md for build options, installation checks and CI.

@@ -22,9 +22,4 @@
 - [Architecture](architecture/direction.md)
 - [SQL backlog](architecture/sql-roadmap.md)
 - [Benchmark methods and reproduction](../benchmarks/README.md)
-- [Provenance and external material](../PROVENANCE.md)
-
-Historical research, review diaries and intermediate measurements remain in the
-[development archive](../PROVENANCE.md#source-only-main-branch--2026-09-16), including
-revision `e93b6b8904`. Current contracts describe supported behavior;
-the retained benchmark report describes its dated measurement, not the latest code.
+- [Sources and attribution](../PROVENANCE.md)

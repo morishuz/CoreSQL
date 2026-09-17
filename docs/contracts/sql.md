@@ -7,7 +7,7 @@ modules in `sql/`. This is a deliberately bounded SQL dialect, not SQLite
 compatibility or a production SQL service.
 
 For planned scope and feature selection, see the [SQL roadmap](../architecture/sql-roadmap.md)
-and [public benchmark readiness](../../benchmarks/tpch/README.md). Planned features
+and [benchmark coverage and methods](../../benchmarks/tpch/README.md). Planned features
 are not part of the supported dialect until implemented and validated.
 
 ## Embedding and prepared statements
@@ -131,9 +131,9 @@ executions see current parameters and the transaction's snapshot.
 SUBSTRING uses one-based Unicode code-point positions in valid UTF-8, preserving
 embedded NULs. With an explicit length, positions before one count toward that
 length; without a length, the remaining suffix is returned. Negative lengths
-and malformed UTF-8 raise constraint errors, and NULL propagates. EXTRACT
-currently supports YEAR from DATE only; other fields and interval arithmetic
-remain outside this batch.
+and malformed UTF-8 raise constraint errors, and NULL propagates. The bundled adapters support
+EXTRACT(YEAR FROM DATE); application adapters can support additional input types.
+Other extraction fields and interval arithmetic are not supplied.
 
 ## Conversion policy
 

@@ -100,7 +100,7 @@ references and owns computed keys.
 
 ### Earlier document files
 
-The example now requires `id` to be a primary key. Earlier unkeyed document files
+The example requires `id` to be a primary key. Earlier unkeyed document files
 remain readable by the engine but are rejected by this wrapper as an unexpected
 schema. To migrate, open the original through `Database::open`, inspect its
 `schema()`, create a separate database with the ID key flag, and insert its rows

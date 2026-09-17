@@ -1,7 +1,7 @@
 # Relational workload support
 
-The structured C++ API now executes the full 32-case `speedtest1 main` workload
-through an adapter. The optional [SQL frontend](sql.md) now lowers SQL text into
+The structured C++ API executes the full 32-case `speedtest1 main` workload
+through an adapter. The optional [SQL frontend](sql.md) lowers SQL text into
 these interfaces; the core remains independent of parsing and SQLite APIs.
 See [the benchmark contract](../../benchmarks/speedtest1.md) for scope and verification.
 
@@ -157,13 +157,13 @@ schema evolution and identities, then rebuilds indexes. New writers require the
 new reader. The durability protocol and 64 MiB encoded-state limit are unchanged;
 identities add eight encoded bytes per row.
 
-The graph and SQL frontend experiments now exercise these interfaces. None is
+The graph extension and SQL frontend exercise these interfaces. None is
 frozen; multi-table execution/aggregation materialization remains an explicit
 tradeoff to revisit with workload evidence.
 
 ## Multiple sort keys and lazy conditional expressions
 
-`Query::order_by` is now `std::vector<Order>` (an experimental source API change).
+`Query::order_by` is `std::vector<Order>`.
 An empty list means no ordering. For example:
 
 ```cpp
@@ -288,7 +288,7 @@ non-integer keys, outer joins, ON predicates and source filters retain the
 existing paths. LIMIT 0 binds without scanning. The resulting equality join uses
 the native integer lookup described below.
 
-Unindexed, native-integer equality inner joins now use a query-local hash lookup
+Unindexed, native-integer equality inner joins use a query-local hash lookup
 of the right-hand input. Existing ordered and primary indexes take precedence.
 The lookup is built on the first non-NULL left key; LIMIT 0, an empty left input,
 or exclusively NULL left keys do not build it. NULL right keys do not enter the

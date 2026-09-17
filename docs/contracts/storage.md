@@ -89,7 +89,7 @@ is tested on macOS; Linux support is not yet exercised in this workspace.
 
 ## Formats and migration
 
-The live format is `CORELOG2`, now writing `CORECHG6` change records with
+The live format is `CORELOG2`, writing `CORECHG6` change records with
 primary-key flags, index implementation IDs, named ordered-index definitions,
 column defaults and stable row identities. The reader also accepts existing
 `CORECHG2/3/4/5` records, including mixed old/new logs. Snapshot exports use `CORESQL5`;
@@ -121,7 +121,7 @@ and snapshot export/import. Existing core and add-on contracts run unchanged.
 `primary_keys` checks atomic uniqueness, cross-chunk key swaps, native key
 semantics, old snapshots, randomized mutations with rollback/checkpoint/reopen,
 legacy snapshot/change decoding, and duplicate-key recovery rejection. The
-document application's crash tests now exercise a keyed table too.
+document application's crash tests exercise a keyed table too.
 
 ## Unconditional clear and join snapshots
 
@@ -155,7 +155,7 @@ existing descriptors, and rejects records that omit rows needing the new width.
 Index creation stores its declaration and rebuilds entries on recovery. Both
 changes participate in the existing commit-marker and sync protocol.
 
-Each row now stores an eight-byte identity that survives compaction, snapshot
+Each row stores an eight-byte identity that survives compaction, snapshot
 export and recovery. It is distinct from the snapshot-local chunk/slot location
 used by providers. Snapshot import supplies the logical identity to the mutation
 layer before insertion, independently of how that layer packs rows into chunks.
@@ -174,7 +174,7 @@ remain readable, with their columns non-nullable. New records can append to old
 logs; no existing column silently becomes nullable. New binaries are required to
 read the new formats. Legacy migration and nullable round-trip tests cover both.
 
-## Application handoff additions
+## Size limits, schema changes and backup
 
 The encoded-size bound is configured with `CORESQL_MAX_ENCODED_MIB` (default 1024,
 range 1–16384). It applies consistently to snapshot encoding/decoding, change
@@ -191,4 +191,4 @@ Dropping a named index is encoded in its table descriptor in the ordinary log.
 native database with exclusive creation. `Database::restore(snapshot, new_path)`
 imports supported exports into durable storage. Existing destinations are rejected.
 After a failed/interrupted operation, the destination may be incomplete; preserve
-the source and retry to a fresh path. See [handoff guide](../usage.md).
+the source and retry to a fresh path. See [backup and upgrade guide](../usage.md).

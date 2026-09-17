@@ -117,7 +117,4 @@ ranking for close results; Q8 also showed variability in a separate check.
 [Contributing](CONTRIBUTING.md)
 
 CoreSQL's original contributions use the [MIT license](LICENSE). External material
-retains its own notices. CoreSQL is independently maintained and is not affiliated
-with SQLite or DuckDB. The original development and SQLite reference history is preserved separately
-from the single-commit main branch; see [provenance](PROVENANCE.md) and
-[third-party notices](third_party/README.md).
+retains its own notices; see [sources and attribution](PROVENANCE.md).

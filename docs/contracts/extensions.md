@@ -236,7 +236,7 @@ are not reordered ahead of potentially throwing functions.
 The bundled hash index uses the type's hash and ordering callbacks with the
 existing 256 COW map buckets. Its ordering must agree with equality: compare
 returns zero exactly for equal keys, and equal keys have the same hash. Collisions
-are allowed. Timestamp keys now use precisely this implementation; no timestamp
+are allowed. Timestamp keys use precisely this implementation; no timestamp
 branches exist in the engine. Hash results need not be persistent because indexes
 are rebuilt from rows.
 
@@ -314,7 +314,7 @@ limits. All of these source interfaces remain experimental.
 
 The [graph add-on](../extensions/graph.md) implements custom edge/path values,
 endpoint extraction and bounded traversal using only public APIs. Generic scoped
-savepoints now let graph views join caller-owned transactions. It validates
+savepoints let graph views join caller-owned transactions. It validates
 composition with snapshots, mutations and recovery;
 it does not establish competitive graph execution. Materialized adjacency queries and facade-only endpoint constraints remain
 interface boundaries. Graph mutations use savepoints to preserve earlier work on

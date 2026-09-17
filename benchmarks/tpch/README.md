@@ -23,7 +23,7 @@ entire query set, not only successful timings. Do not derive an official TPC met
 from the diagnostic audit or compare these small-scale measurements to official
 published scores.
 
-## Repeat the diagnostic audit
+## Check query syntax and binding
 
 Build the bridge with normal tests enabled (Python and C++20 are sufficient;
 DuckDB itself is not needed):
@@ -45,8 +45,7 @@ hash. Unsupported SQL is an audit result, not a tool error; missing files, bad
 hashes, crashes and diagnostic setup failures exit unsuccessfully.
 
 This tool intentionally does not time queries, generate data, claim correctness,
-or impose a CI requirement that missing features stay unsupported. Re-run it as
-batches land and update the assessment only after reviewing the evidence.
+or impose a CI requirement that missing features stay unsupported. Run the populated-data checks below to verify query answers.
 
 ## Small populated Q2/Q16 check
 
@@ -241,15 +240,6 @@ CoreSQL speedup, below 1 means CoreSQL is slower. The three drivers have differe
 result-conversion overhead, so this remains a client-latency comparison.
 
 See [the retained three-engine table](results/OPTIMIZATION_ROUND2.md).
-
-The September 17 type-adapter regression check used the same SF 0.03 dataset,
-Release settings and resource limits. All 22 repaired queries matched DuckDB;
-Q7/Q8 returned to baseline performance and Q9 completed within the memory limit.
-Average loading was 3.246 s versus the 3.582 s committed baseline. A separate
-nine-sample Q17 check measured 13.125 ms versus 12.994 ms, with identical execution
-counters. These observations are workload-specific, not general performance
-claims. Intermediate and final diagnostic artifacts are retained in Git history
-at `60fb00554edc578f2870d16ee90b792bc5dad630`, rather than in the current source tree.
 
 ### Inspect execution work
 

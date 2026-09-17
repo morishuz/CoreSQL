@@ -39,4 +39,4 @@ configuration, not the reproducible pinned benchmark.
 Keep the original archive checksum stable. If a provider changes the bytes served
 at the pinned URL, setup deliberately fails; investigate and review a pin change
 instead of bypassing verification. No generated SQLite files are committed or
-installed with CoreSQL. See [notices](../../third_party/README.md).
+installed with CoreSQL. See [sources and attribution](../../PROVENANCE.md).

@@ -49,8 +49,3 @@ hashes and environment details with any published table. Report failures and
 resource limits without assigning speed ratios. The retained TPC-H evidence
 supports the README's historical claim; rerun on an exact release revision before
 claiming release performance.
-
-Older research notes, optimization reports and intermediate measurements remain
-in the [development archive](../PROVENANCE.md#source-only-main-branch--2026-09-16),
-including commit `e93b6b8904`. They are not current API contracts or
-current performance claims.

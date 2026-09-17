@@ -111,6 +111,6 @@ CREATE TABLE messages(id INTEGER PRIMARY KEY, body TEXT);
 INSERT INTO messages(body) VALUES ('Hello') RETURNING id, body;
 ```
 
-Omitted/NULL integer primary keys can now be generated; INSERT RETURNING exposes
+Omitted/NULL integer primary keys can be generated; INSERT RETURNING exposes
 columns and aliases. See the [SQL contract](contracts/sql.md#generated-integer-primary-keys-and-insert-returning)
 for deletion reuse, exhaustion, rollback and the initial maximum-scan cost.

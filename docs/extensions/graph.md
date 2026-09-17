@@ -95,11 +95,11 @@ A path validates its shape and IDs, not its continued existence in a live graph.
 It may be stored in an ordinary table even after its original edges are deleted.
 The same registry must be installed before loading a database containing these types.
 
-## Boundaries exposed
+## Limitations and costs
 
-1. **Multi-step composition now uses generic savepoints.** The original need to
-   own the entire transaction is resolved by borrowed views and operation-scoped
-   rollback. Savepoints copy the table map and retain shared state, so this
+1. **Multi-step composition uses generic savepoints.** Borrowed views support
+   caller-owned transactions with operation-scoped rollback. Savepoints copy the
+   table map and retain shared state, so this
    convenience has metadata and copy-on-write costs; it is not a performance claim.
 2. **Traversal runs outside the query executor.** Each expanded vertex performs
    a materialized adjacency query. Bidirectional reads merge two queries, and

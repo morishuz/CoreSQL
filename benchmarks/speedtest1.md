@@ -1,14 +1,14 @@
 # Full speedtest1 main workload
 
-CoreSQL now runs **all 32 cases of the upstream `main` workload** through the
+CoreSQL runs **all 32 cases of the upstream `main` workload** through the
 structured C++ API, with query results and post-case table contents checked
 against the pinned SQLite reference. Cases 200, 980 and 990 use explicitly
 identified native maintenance equivalents. There are no skipped cases.
 
 The original API mode described here is a faithful workload adapter, not the
 unchanged SQLite executable running on CoreSQL. The optional SQL mode described
-below now exercises the frontend using SQL text. Other suites such as CTE, JSON, star and the
-`mix1` default macro are outside this milestone. Always specify `--testset main`
+below exercises the frontend using SQL text. Other suites such as CTE, JSON, star and the
+`mix1` default macro are not covered by this adapter. Always specify `--testset main`
 when running the upstream reference.
 
 ## Build and run
@@ -26,8 +26,8 @@ build/speedtest/coresql_speedtest1_main 100
 ctest --test-dir build/speedtest --output-on-failure
 ```
 
-The source of truth is unchanged `source/test/speedtest1.c` in the prepared external reference, from
-`coresql-upstream-baseline-2026-09-08`. The standalone `sqlite_speedtest1` target
+The source of truth is unchanged `source/test/speedtest1.c` in the prepared external
+reference, pinned by [revision and checksum](reference/sqlite.json). The standalone `sqlite_speedtest1` target
 compiles it unchanged. The adapter links its number-name, swizzle and rounding
 functions from a second object with only its main symbol renamed. The deterministic
 random recurrence and square-root estimate match upstream. SQL is supplied to

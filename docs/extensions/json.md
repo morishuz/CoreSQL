@@ -65,7 +65,7 @@ The generic index maps keys to sparse 128-slot masks naming rows. Duplicate
 emissions set the same bit, so removing one row cannot remove a neighbour's
 membership. Index snapshots share buckets and postings. An edit copies affected
 containers privately before publication. JSON supplies no index storage, clone
-logic or transaction callbacks. Exact membership results now bypass JSON parsing
+logic or transaction callbacks. Exact membership results bypass JSON parsing
 at query time; unindexed queries still extract and compare keys.
 
 The existing `IndexAddon` API remains available for algorithms that cannot use

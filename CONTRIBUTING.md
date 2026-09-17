@@ -52,8 +52,8 @@ query diagnostics and durability. Snapshot export does not commit durably.
 Follow [the reference setup](benchmarks/reference/README.md). Optional comparisons
 use a pinned, unmodified SQLite baseline; keep compiler, workload and durability
 settings explicit. Do not present configuration gains as engine improvements.
-Published benchmark evidence stays with its methodology; historical investigations
-and intermediate observations remain in Git history. Current comparisons work without full Git history.
+Keep published benchmark evidence with its methodology. Keep temporary profiles,
+audit notes and intermediate measurements outside the tracked source tree.
 
 ## Installation and consumer verification
 
@@ -81,11 +81,4 @@ record copied/adapted source in [PROVENANCE.md](PROVENANCE.md).
 Before publishing an experimental release, check clean-clone builds, CI results,
 installed consumption, package version and changelog, current contracts, fixture
 hashes, source notices and benchmark reproducibility. Tag the tested commit only
-after deciding to publish. Do not treat the historical SQLite VERSION or tags as
-CoreSQL release versions; CMakeLists.txt is the CoreSQL version source.
-
-The single-commit main branch is prepared for a separate public repository.
-Original development history is preserved on `codex/backup/pre-public-squash-2026-09-16`
-in the development repository. Keep provenance and notices when copying main.
-Creating the public repository and changing visibility remain owner decisions;
-do not copy backup branches or inherited SQLite tags into the new repository.
+after deciding to publish. CMakeLists.txt is the CoreSQL version source.

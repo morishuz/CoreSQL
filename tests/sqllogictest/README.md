@@ -1,6 +1,6 @@
 # Pinned SQLLogicTest coverage
 
-The corpus now includes the five **complete, unchanged** upstream files
+The corpus includes the five **complete, unchanged** upstream files
 `test/select1.test` through `test/select5.test`: 8,884 queries and 1,822 setup
 statements. Files are pinned by SHA-256 in `manifest.json`, with the original
 license retained. Tests need no network access. This is correctness coverage,
@@ -24,8 +24,8 @@ Select1 was retrieved September 11, 2026; select2–5 on September 13.
 | **Total** | **1,822** | **8,884** | **0** | **0** |
 
 Python's SQLite runtime (3.51.2) validates every stored upstream result:
-all 10,706 records pass in both engines, with no blocked, skipped, unsupported or
-failed records. The 2,803 previously unsupported select4 queries now pass.
+all 10,706 records passed in both engines, with no blocked, skipped, unsupported or
+failed records in that run.
 
 Select2/3 exercise stored NULLs, expressions, ordering, labels and coalescing.
 Select5 exercises joins through up to 64 tables. Select4 adds membership,
@@ -37,28 +37,6 @@ RIGHT and FULL joins, aggregate DISTINCT, casts, mixed scalar expressions and
 atomic storage conversions. Native extension tests verify typed NULL rows,
 custom-type DISTINCT and validation before callbacks. Passing this pinned corpus
 does not establish complete SQL support.
-
-## What changed
-
-- IN/NOT IN, compound SELECT, general inner/cross joins, grouping/HAVING and
-  aggregate expressions now use the structured core API. Source-free SELECT
-  shares the same execution path. Pure source filters can run before joins.
-- Materialized relational stages share temporary-table construction and accurate
-  row counts, including the join ORDER BY/LIMIT regression fix.
-- Shared stored-value validation now covers insert, replace, update, defaults,
-  integrity checks and recovery. Nullable storage uses versioned encoding; legacy
-  snapshots/logs retain their old non-nullable declarations.
-- SQL supports nullable columns, IS NULL/IS NOT NULL, and lazy COALESCE. CASE and
-  COALESCE share result-type validation. Primary keys remain non-nullable.
-- VARCHAR uses text storage without enforcing the declared length.
-- The join planner resolves unqualified names through the existing column resolver.
-- Associative AND/OR chains are flat in the parser. Predicate evaluation retains
-  order and short-circuiting; scalar calls lower to a balanced tree. This removes
-  artificial depth failures on wide predicates without raising the 64-level
-  nesting limit or removing token/node limits.
-
-No fixture was rewritten to fit the engine. The baseline was updated only after
-reviewing every changed record; failures cannot be accepted into it.
 
 ## Run and regression policy
 
@@ -89,19 +67,11 @@ loudly. It is not a full upstream-runner replacement: empty-result column metada
 is unavailable, and general text-to-number coercion is not emulated. The small
 C++ bridge uses public APIs and is sanitizer-instrumented when enabled.
 
-## Next milestones
+## Scope
 
-1. Add unchanged public files targeting grouping and aggregate expressions.
-2. Select an analytical benchmark query set and inventory its numeric/date
-   requirements before implementing more syntax speculatively.
-3. Use those workloads to prioritize derived tables/CTEs and
-   remaining expression/type semantics.
-
-The [SQL contract](../../docs/contracts/sql.md) describes remaining limitations. Passing these
-files does not establish full SQLLogicTest or SQL-standard conformance.
-
-Validation includes 42 CTests in Release and AddressSanitizer/UndefinedBehaviorSanitizer
-builds, including speedtest1 correctness checks. The nullable-storage test covers
-NULL defaults, unique/range indexes, updates, rollback, custom types, snapshots,
-checkpointing, legacy snapshot reads and mixed-version log recovery. Python and
-its SQLite library are not sanitizer-instrumented; CoreSQL and the bridge are.
+The [SQL contract](../../docs/contracts/sql.md) describes supported behavior and
+remaining limitations. Passing these files does not establish full SQLLogicTest
+or SQL-standard conformance. Additional native and differential tests cover
+transactions, extension types, persistence and recovery. Python and its SQLite
+library are not sanitizer-instrumented; CoreSQL and the bridge are in sanitizer
+builds.
