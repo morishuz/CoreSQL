@@ -11,6 +11,9 @@ compatibility and permanent storage-format compatibility are not guaranteed.
   execution specializes on those, not on integer type identity.
 - Custom types may use tagged compact `i64`/`i128` cells; INTEGER/REAL/TEXT stay
   untagged. Hash joins and grouping then follow `native_ops` for those layouts.
+- DATE and TIMESTAMP store compact `i64` cells with `native_ops`, so they share
+  integer hash joins and grouping. On-disk encoding remains length-prefixed
+  little-endian days/microseconds.
 - Typed relational API with joins, grouping, aggregates, ordering, indexes and
   correlated subqueries; statement-atomic mutations and snapshot transactions.
 - Durable logs, checkpoints, backup/restore, integrity checks, named savepoints

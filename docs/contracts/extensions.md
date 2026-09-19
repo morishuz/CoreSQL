@@ -25,7 +25,8 @@ share their immutable type descriptor and bytes together, keeping the `Value`
 container compact instead of embedding a full type descriptor in every value.
 `EncodedTypeAddon` and `encoded_type(...)` are convenience adapters for types
 whose callbacks naturally consume `ByteView`. The adapter produces the same
-`TypeAddon` used by scalars. Timestamp implements the value callbacks directly, including hashing. Vectors
+`TypeAddon` used by scalars. DATE and TIMESTAMP use compact `i64` cells with
+`native_ops`. Timestamp implements the value callbacks directly, including hashing. Vectors
 remain equality-only, with fixed or variable dimensions; boxes have equality
 but no public ordering. Unsupported operations fail during query binding.
 

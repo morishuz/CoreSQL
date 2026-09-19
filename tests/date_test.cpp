@@ -1,6 +1,5 @@
 #include "check.hpp"
 #include "coresql/date.hpp"
-#include "coresql/encoding.hpp"
 #include "coresql/sql.hpp"
 #include <array>
 using namespace coresql;
@@ -42,10 +41,8 @@ int main() {
         auto bad_type = dates::type();
         bad_type.parameters.push_back(std::byte{0});
         expect(ErrorCode::type, [&] { r.validate(bad_type); });
-        Bytes malformed;
-        encoding::u64(malformed, UINT64_MAX / 2);
-        expect(ErrorCode::type, [&] { r.validate(Opaque(dates::type(), malformed), dates::type()); });
-        expect(ErrorCode::format, [&] { r.validate(Opaque(dates::type(), Bytes{}), dates::type()); });
+        expect(ErrorCode::type, [&] { r.validate(Opaque(dates::type(), Bytes(8)), dates::type()); });
+        expect(ErrorCode::type, [&] { r.validate(compact(dates::type(), INT64_MAX), dates::type()); });
         CHECK(r.compare(dates::parse("1969-12-31"), dates::parse("1970-01-01")) < 0);
 
         TempDirectory temp;

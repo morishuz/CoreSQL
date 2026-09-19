@@ -3,7 +3,7 @@
 
 namespace coresql::dates {
 // Proleptic Gregorian calendar dates, 0001-01-01 through 9999-12-31.
-// Encoding v1: signed days since 1970-01-01, little-endian int64.
+// Compact i64 cell: signed days since 1970-01-01. Persistence is eight LE bytes.
 Type type();
 Value parse(std::string_view iso_date);
 Value value(std::int64_t unix_days);

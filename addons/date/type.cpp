@@ -1,6 +1,4 @@
 #include "coresql/date.hpp"
-#include "coresql/encoding.hpp"
-#include <bit>
 #include <chrono>
 
 namespace coresql::dates {
@@ -13,28 +11,20 @@ void check(std::int64_t count) {
     if (count < first || count > last)
         throw Error(ErrorCode::type, "DATE is outside 0001-01-01..9999-12-31");
 }
-std::int64_t decode(ByteView bytes) {
-    encoding::Reader reader(bytes);
-    auto count = std::bit_cast<std::int64_t>(reader.u64());
-    reader.end();
-    check(count);
-    return count;
-}
 } // namespace
 Type type() {
     return {id, 1, {}};
 }
 Value value(std::int64_t unix_days) {
     check(unix_days);
-    Bytes bytes;
-    encoding::u64(bytes, std::bit_cast<std::uint64_t>(unix_days));
-    return Opaque(type(), std::move(bytes));
+    return compact(type(), unix_days);
 }
 std::int64_t days(const Value& input) {
-    auto opaque = std::get_if<Opaque>(&input);
-    if (!opaque || opaque->type() != type())
+    if (type_of(input) != type())
         throw Error(ErrorCode::type, "Expected DATE value");
-    return decode(opaque->bytes());
+    auto count = i64_payload(input);
+    check(count);
+    return count;
 }
 Value parse(std::string_view input) {
     if (input.size() != 10 || input[4] != '-' || input[7] != '-')
@@ -84,7 +74,7 @@ void install(Registry& registry) {
                         .year()));
         }});
     registry.add(
-        TypeAddon{id, 1, Layout::bytes,
+        TypeAddon{id, 1, Layout::i64,
                   [](ByteView p) {
                       if (!p.empty())
                           throw Error(ErrorCode::type, "DATE has no type parameters");
@@ -95,7 +85,7 @@ void install(Registry& registry) {
                       auto x = dates::days(a), y = dates::days(b);
                       return (x > y) - (x < y);
                   },
-                  [](ByteView, const Value& v) { return std::hash<std::int64_t>{}(dates::days(v)); }});
+                  [](ByteView, const Value& v) { return std::hash<std::int64_t>{}(dates::days(v)); }, true});
     registry.add(Function{"date.parse",
                           [](std::span<const Type> t) {
                               if (t.size() != 1 || t[0] != text())

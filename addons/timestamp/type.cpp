@@ -1,6 +1,4 @@
 #include "coresql/timestamp.hpp"
-#include "coresql/encoding.hpp"
-#include <bit>
 
 namespace coresql::timestamps {
 namespace {
@@ -8,33 +6,22 @@ constexpr auto id = "coresql.timestamp.us";
 void parameters(ByteView bytes) {
     if (!bytes.empty()) throw Error(ErrorCode::type, "Timestamp has no type parameters");
 }
-std::int64_t decode(ByteView bytes) {
-    encoding::Reader reader(bytes);
-    auto result = std::bit_cast<std::int64_t>(reader.u64());
-    reader.end();
-    return result;
-}
 }
 Type type() { return {id, 1, {}}; }
-Value value(std::int64_t unix_microseconds) {
-    Bytes bytes;
-    encoding::u64(bytes, std::bit_cast<std::uint64_t>(unix_microseconds));
-    return Opaque(type(), std::move(bytes));
-}
+Value value(std::int64_t unix_microseconds) { return compact(type(), unix_microseconds); }
 std::int64_t microseconds(const Value& value) {
-    auto* opaque = std::get_if<Opaque>(&value);
-    if (!opaque || opaque->type() != type()) throw Error(ErrorCode::type, "Expected timestamp value");
-    return decode(opaque->bytes());
+    if (type_of(value) != type()) throw Error(ErrorCode::type, "Expected timestamp value");
+    return i64_payload(value);
 }
 void install(Registry& registry) {
-    registry.add(TypeAddon{id, 1, Layout::bytes, parameters,
-        [](ByteView, const Value& v) { (void)decode(std::get<Opaque>(v).bytes()); },
-        [](ByteView, const Value& a, const Value& b) { return decode(std::get<Opaque>(a).bytes()) == decode(std::get<Opaque>(b).bytes()); },
+    registry.add(TypeAddon{id, 1, Layout::i64, parameters,
+        [](ByteView, const Value& v) { (void)microseconds(v); },
+        [](ByteView, const Value& a, const Value& b) { return microseconds(a) == microseconds(b); },
         [](ByteView, const Value& a, const Value& b) {
-            auto x = decode(std::get<Opaque>(a).bytes()), y = decode(std::get<Opaque>(b).bytes());
+            auto x = microseconds(a), y = microseconds(b);
             return (x > y) - (x < y);
         },
-        [](ByteView, const Value& v) { return std::hash<std::int64_t>{}(decode(std::get<Opaque>(v).bytes())); }});
+        [](ByteView, const Value& v) { return std::hash<std::int64_t>{}(microseconds(v)); }, true});
     registry.add(Function{"timestamp.delta_us", [](std::span<const Type> types) {
         if (types.size() != 2 || types[0] != type() || types[1] != type())
             throw Error(ErrorCode::type, "timestamp.delta_us expects two timestamps");

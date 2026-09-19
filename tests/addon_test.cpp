@@ -47,7 +47,7 @@ int main() { return tests([] {
     expect(ErrorCode::type, [&] { vector({1, 2}, 3); });
     expect(ErrorCode::type, [&] { vector({std::numeric_limits<float>::infinity()}); });
     expect(ErrorCode::type, [&] { vector({std::numeric_limits<float>::quiet_NaN()}); });
-    expect(ErrorCode::format, [&] { tx.insert("docs", {std::string("bad"), vector({1}), Opaque(timestamps::type(), Bytes(7))}); });
+    expect(ErrorCode::type, [&] { tx.insert("docs", {std::string("bad"), vector({1}), Opaque(timestamps::type(), Bytes(7))}); });
     expect(ErrorCode::format, [&] { tx.create_table("badparams", {{"v", {vectors::type().id, 1, Bytes(3)}}}); });
     expect(ErrorCode::type, [&] { tx.create_table("badversion", {{"v", {vectors::type().id, 2, {}}}}); });
     tx.commit();
