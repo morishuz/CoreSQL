@@ -120,6 +120,7 @@ inline bool native_scalar(const TypeAddon& addon) {
 }
 // Payload of an i64 cell: untagged INTEGER or a tagged Compact i64.
 std::int64_t i64_payload(const Value&);
+std::array<std::byte, 16> i128_payload(const Value&);
 TypeAddon encoded_type(EncodedTypeAddon);
 void install_scalar_types(class Registry&);
 

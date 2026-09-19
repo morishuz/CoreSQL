@@ -14,6 +14,8 @@ compatibility and permanent storage-format compatibility are not guaranteed.
 - DATE and TIMESTAMP store compact `i64` cells with `native_ops`, so they share
   integer hash joins and grouping. On-disk encoding remains length-prefixed
   little-endian days/microseconds.
+- DECIMAL stores a compact `i128` coefficient; on-disk bytes match the previous
+  Opaque encoding.
 - Typed relational API with joins, grouping, aggregates, ordering, indexes and
   correlated subqueries; statement-atomic mutations and snapshot transactions.
 - Durable logs, checkpoints, backup/restore, integrity checks, named savepoints

@@ -39,7 +39,7 @@ int main() {
         expect(ErrorCode::type, [&] { decimals::format_of(integer()); });
         expect(ErrorCode::type, [&] { decimals::type(39, 0); });
         expect(ErrorCode::type, [&] { decimals::type(1, 2); });
-        expect(ErrorCode::format, [&] { native.validate(Opaque(t, Bytes{}), t); });
+        expect(ErrorCode::type, [&] { native.validate(Opaque(t, Bytes{}), t); });
         CHECK(decimals::to_integer(decimals::parse("-9223372036854775808", decimals::type(19, 0))) ==
               INT64_MIN);
         expect(ErrorCode::constraint,

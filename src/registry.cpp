@@ -75,6 +75,14 @@ std::int64_t i64_payload(const Value& value) {
     std::memcpy(&payload, cell->bytes().data(), 8);
     return payload;
 }
+std::array<std::byte, 16> i128_payload(const Value& value) {
+    auto* cell = std::get_if<Compact>(&value);
+    if (!cell || cell->bytes().size() != 16)
+        fail(ErrorCode::type, "Expected i128 payload");
+    std::array<std::byte, 16> payload{};
+    std::memcpy(payload.data(), cell->bytes().data(), 16);
+    return payload;
+}
 TypeAddon encoded_type(EncodedTypeAddon source) {
     TypeAddon result;
     result.id = std::move(source.id); result.version = source.version;

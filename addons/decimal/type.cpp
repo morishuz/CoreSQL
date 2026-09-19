@@ -3,6 +3,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstring>
 
 #ifndef __SIZEOF_INT128__
 #error "The DECIMAL add-on requires compiler support for 128-bit integers"
@@ -41,17 +42,19 @@ Wide power(unsigned n) {
         overflow();
     return powers[n];
 }
+Wide decode(ByteView bytes) {
+    encoding::Reader reader(bytes);
+    auto lo = reader.u64(), hi = reader.u64();
+    reader.end();
+    return std::bit_cast<Wide>((Unsigned(hi) << 64) | lo);
+}
 Wide coefficient(const Value& v) {
     if (auto i = std::get_if<std::int64_t>(&v))
         return *i;
-    auto o = std::get_if<Opaque>(&v);
-    if (!o || !is_decimal(o->type()))
+    if (!is_decimal(type_of(v)))
         throw Error(ErrorCode::type, "Expected DECIMAL");
-    auto f = format_of(o->type());
-    encoding::Reader reader(o->bytes());
-    auto lo = reader.u64(), hi = reader.u64();
-    reader.end();
-    auto n = std::bit_cast<Wide>((Unsigned(hi) << 64) | lo);
+    auto f = format_of(type_of(v));
+    auto n = decode(i128_payload(v));
     auto bound = power(f.precision);
     if (n <= -bound || n >= bound)
         overflow();
@@ -66,7 +69,9 @@ Value value(Wide n, const Type& t) {
     bytes.reserve(16);
     encoding::u64(bytes, static_cast<std::uint64_t>(bits));
     encoding::u64(bytes, static_cast<std::uint64_t>(bits >> 64));
-    return Opaque(t, std::move(bytes));
+    std::array<std::byte, 16> payload{};
+    std::memcpy(payload.data(), bytes.data(), 16);
+    return compact(t, payload);
 }
 Format numeric(const Type& t) {
     if (t == integer())
@@ -355,7 +360,7 @@ std::int64_t to_integer(const Value& v, bool truncate) {
     return static_cast<std::int64_t>(n);
 }
 void install(Registry& r) {
-    r.add(TypeAddon{id, 1, Layout::bytes, [](ByteView p) { (void)parameter_format(p); },
+    r.add(TypeAddon{id, 1, Layout::i128, [](ByteView p) { (void)parameter_format(p); },
                     [](ByteView, const Value& v) { (void)coefficient(v); },
                     [](ByteView, const Value& a, const Value& b) { return coefficient(a) == coefficient(b); },
                     [](ByteView, const Value& a, const Value& b) { return compare(a, b); },
@@ -363,7 +368,8 @@ void install(Registry& r) {
                         auto bits = std::bit_cast<Unsigned>(coefficient(v));
                         return std::hash<std::uint64_t>{}(static_cast<std::uint64_t>(bits)) ^
                                std::hash<std::uint64_t>{}(static_cast<std::uint64_t>(bits >> 64));
-                    }});
+                    },
+                    true});
     for (std::string op : {"add", "subtract", "multiply", "divide"}) {
         auto infer = [op](std::span<const Type> t) { return arithmetic_type(t, op); };
         r.add(Function{
