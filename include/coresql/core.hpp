@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <compare>
 #include <cstdint>
@@ -60,7 +61,25 @@ struct Null {
     bool operator==(const Null& b) const { return type && b.type && *type == *b.type; }
     explicit Null(Type t) : type(std::make_shared<const Type>(std::move(t))) {}
 };
-using Value = std::variant<std::int64_t, double, std::string, Opaque, Null>;
+// Tagged compact cell. Default identities stay untagged; custom i64/i128 use this.
+class Compact {
+public:
+    Compact(Type type, std::int64_t payload);
+    Compact(Type type, std::array<std::byte, 16> payload);
+    const Type& type() const { return *type_; }
+    ByteView bytes() const { return {payload_.data(), width_}; }
+    bool operator==(const Compact& b) const {
+        return type() == b.type() && std::ranges::equal(bytes(), b.bytes());
+    }
+
+private:
+    const Type* type_;
+    std::array<std::byte, 16> payload_{};
+    std::uint8_t width_ = 8;
+};
+using Value = std::variant<std::int64_t, double, std::string, Opaque, Null, Compact>;
+Value compact(Type, std::int64_t);
+Value compact(Type, std::array<std::byte, 16>);
 inline bool is_null(const Value& v) {
     return std::holds_alternative<Null>(v);
 }
@@ -78,7 +97,7 @@ struct EncodedTypeAddon {
 };
 // Closed cell layouts. Identity is open; a type chooses one of these payloads.
 // i64/f64/text have default identities (integer/real/text) and may be untagged.
-enum class Layout { i64, f64, text, bytes };
+enum class Layout { i64, f64, text, bytes, i128 };
 struct TypeAddon {
     std::string id;
     std::uint32_t version = 1;
@@ -99,10 +118,8 @@ inline bool native_i64(const TypeAddon& addon) {
 inline bool native_scalar(const TypeAddon& addon) {
     return addon.native_ops && addon.layout != Layout::bytes;
 }
-// Payload of an untagged i64 cell (Layout::i64's default identity).
-inline std::int64_t i64_payload(const Value& value) {
-    return std::get<std::int64_t>(value);
-}
+// Payload of an i64 cell: untagged INTEGER or a tagged Compact i64.
+std::int64_t i64_payload(const Value&);
 TypeAddon encoded_type(EncodedTypeAddon);
 void install_scalar_types(class Registry&);
 

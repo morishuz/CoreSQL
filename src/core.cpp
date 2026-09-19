@@ -37,6 +37,8 @@ void detail::refresh(Chunk& chunk) {
             } else if (const auto* v = std::get_if<Opaque>(&value)) {
                 bytes = v->bytes().size();
                 prefix = 8;
+            } else if (const auto* v = std::get_if<Compact>(&value)) {
+                bytes = v->bytes().size();
             }
             if (is_null(value))
                 bytes = 0;

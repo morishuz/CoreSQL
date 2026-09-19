@@ -7,8 +7,7 @@ namespace coresql::detail {
 std::vector<Value> KeyBinding::keys(const Value& value) const {
     auto result = extractor.extract(value);
     for (const auto& key : result) {
-        if (key.index() != static_cast<std::size_t>(addon.layout) ||
-            (addon.layout == Layout::bytes && std::get<Opaque>(key).type() != extractor.key_type))
+        if (type_of(key) != extractor.key_type)
             throw Error(ErrorCode::type, "Extractor returned the wrong key type");
         addon.validate_value(extractor.key_type.parameters, key);
     }

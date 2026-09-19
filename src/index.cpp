@@ -58,7 +58,8 @@ void synchronize_index(const Table& original, Table& replacement, const Registry
                 else if (const auto* v = std::get_if<Opaque>(&a)) {
                     auto x = v->bytes(), y = std::get<Opaque>(b).bytes();
                     same = x.size() == y.size() && (x.data() == y.data() || std::equal(x.begin(), x.end(), y.begin()));
-                } else if (const auto* v = std::get_if<std::int64_t>(&a)) same = *v == std::get<std::int64_t>(b);
+                } else if (const auto* v = std::get_if<Compact>(&a)) same = *v == std::get<Compact>(b);
+                else if (const auto* v = std::get_if<std::int64_t>(&a)) same = *v == std::get<std::int64_t>(b);
                 else if (const auto* v = std::get_if<double>(&a)) same = std::bit_cast<std::uint64_t>(*v) == std::bit_cast<std::uint64_t>(std::get<double>(b));
                 else same = std::get<std::string>(a) == std::get<std::string>(b);
                 if (same) continue;

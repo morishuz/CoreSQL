@@ -30,13 +30,15 @@ remain equality-only, with fixed or variable dimensions; boxes have equality
 but no public ordering. Unsupported operations fail during query binding.
 
 `i64`, `f64` and `text` have default identities (`core.integer`, `core.real`,
-`core.text`) because an ordinary `int64_t` value has no separate type tag. Only
-those identities may use the compact layouts in this phase; custom identities use
-`Opaque` bytes (`Layout::bytes`). The engine frames these bytes; the extension
-owns their encoding and validation. Changing arbitrary physical row layouts is
-not part of this API. Execution specializes on `layout` plus `native_ops`, not on
-type identity. The existing payload/peak counters remain layout-based logical
-sizes, not a measurement of all extension/index allocations.
+`core.text`) because an ordinary `int64_t` value has no separate type tag. Those
+identities stay untagged. Other types may choose `Layout::i64` or `Layout::i128`
+and store a tagged `Compact` cell; `f64` and `text` remain reserved for their
+default identities. Heap payloads use `Opaque` bytes (`Layout::bytes`). The engine
+frames compact and opaque payloads; the extension owns encoding and validation.
+Changing arbitrary physical row layouts is not part of this API. Execution
+specializes on `layout` plus `native_ops`, not on type identity. The existing
+payload/peak counters remain layout-based logical sizes, not a measurement of
+all extension/index allocations.
 
 `TypeAddon::native_ops` is false by default. The built-in integer, real and text
 providers set it to certify that equality, ordering and hashing are the layout's

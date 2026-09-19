@@ -49,18 +49,11 @@ int main() { return tests([] {
     expect(ErrorCode::type, [&] { tx.create_table("invalid_builtin", {{"v", {"core.integer", 2, {}}}}); });
     {
         Registry locked;
-        TypeAddon days;
-        days.id = "test.days";
-        days.version = 1;
-        days.layout = Layout::i64;
-        days.validate_type = [](ByteView p) { if (!p.empty()) throw Error(ErrorCode::type, "No parameters"); };
-        days.validate_value = [](ByteView, const Value&) {};
-        expect(ErrorCode::type, [&] { locked.add(days); });
         auto stolen = locked.addon(integer());
-        stolen.id = "test.days";
-        expect(ErrorCode::type, [&] { Registry other; other.add(stolen); });
-        stolen = locked.addon(integer());
         stolen.layout = Layout::bytes;
+        expect(ErrorCode::type, [&] { Registry other; other.add(stolen); });
+        stolen = locked.addon(real());
+        stolen.id = "test.rate";
         expect(ErrorCode::type, [&] { Registry other; other.add(stolen); });
     }
     expect(ErrorCode::schema, [&] { tx.query(Query{"empty", {column("missing")}, {}, {}, 0}); });
@@ -158,4 +151,49 @@ int main() { return tests([] {
     auto moved_rows = assigned.query(Query{"moved"}).rows;
     CHECK(moved_rows.size() == 1);
     CHECK(std::get<std::int64_t>(moved_rows[0][0]) == 1);
+
+    {
+        Type days{"test.days", 1, {}};
+        Registry tagged;
+        TypeAddon addon;
+        addon.id = days.id;
+        addon.layout = Layout::i64;
+        addon.native_ops = true;
+        addon.validate_type = [](ByteView p) { if (!p.empty()) throw Error(ErrorCode::type, "No parameters"); };
+        addon.validate_value = [](ByteView, const Value& v) { (void)i64_payload(v); };
+        addon.equal = [](ByteView, const Value& a, const Value& b) { return i64_payload(a) == i64_payload(b); };
+        addon.compare = [](ByteView, const Value& a, const Value& b) {
+            auto x = i64_payload(a), y = i64_payload(b);
+            return (x > y) - (x < y);
+        };
+        addon.hash = [](ByteView, const Value& v) { return std::hash<std::int64_t>{}(i64_payload(v)); };
+        tagged.add(std::move(addon));
+        expect(ErrorCode::type, [&] { compact(integer(), std::int64_t{1}); });
+        auto cell = compact(days, std::int64_t{7});
+        CHECK(type_of(cell) == days && i64_payload(cell) == 7);
+        Database calendar(tagged);
+        auto seed = calendar.begin();
+        seed.create_table("events", {{"day", days, true}, {"n", integer()}});
+        seed.create_table("other", {{"day", days, true}, {"n", integer()}});
+        seed.insert("events", {compact(days, std::int64_t{1}), std::int64_t{10}});
+        seed.insert("other", {compact(days, std::int64_t{1}), std::int64_t{20}});
+        expect(ErrorCode::type, [&] { seed.insert("events", {std::int64_t{1}, std::int64_t{0}}); });
+        seed.commit();
+        Query join{"events"};
+        join.alias = "a";
+        join.join = Join{"other", "b", column("a", "day"), column("b", "day")};
+        join.select = {column("a", "n"), column("b", "n")};
+        auto joined = calendar.query(join);
+        CHECK(joined.rows.size() == 1);
+        CHECK(i64_payload(joined.rows[0][0]) == 10 && i64_payload(joined.rows[0][1]) == 20);
+        Query grouped{"events", {column("day"), aggregate("count")}};
+        grouped.group_by = {column("day")};
+        grouped.repeatable = true;
+        CHECK(i64_payload(calendar.query(grouped).rows[0][1]) == 1);
+        auto compact_path = temp.path / "compact.csql";
+        calendar.save(compact_path);
+        auto compact_restored = Database::load(compact_path, tagged);
+        CHECK(type_of(compact_restored.query(Query{"events"}).rows[0][0]) == days);
+        CHECK(i64_payload(compact_restored.query(Query{"events"}).rows[0][0]) == 1);
+    }
 }); }

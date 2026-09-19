@@ -3,6 +3,7 @@
 #include "storage.hpp"
 #include "index.hpp"
 
+#include <array>
 #include <bit>
 #include <cerrno>
 #include <cstring>
@@ -147,7 +148,20 @@ void write_value(Bytes& data, const Value& value) {
         encoding::u64(data, std::bit_cast<std::uint64_t>(*d));
     else if (const auto* s = std::get_if<std::string>(&value))
         field(data, view(*s));
-    else
+    else if (const auto* cell = std::get_if<Compact>(&value)) {
+        auto bytes = cell->bytes();
+        if (bytes.size() == 8) {
+            std::int64_t payload = 0;
+            std::memcpy(&payload, bytes.data(), 8);
+            encoding::u64(data, std::bit_cast<std::uint64_t>(payload));
+        } else {
+            std::uint64_t lo = 0, hi = 0;
+            std::memcpy(&lo, bytes.data(), 8);
+            std::memcpy(&hi, bytes.data() + 8, 8);
+            encoding::u64(data, lo);
+            encoding::u64(data, hi);
+        }
+    } else
         field(data, std::get<Opaque>(value).bytes());
 }
 Value read_value(Reader& reader, const Type& type, const Registry& registry, bool tagged) {
@@ -159,12 +173,21 @@ Value read_value(Reader& reader, const Type& type, const Registry& registry, boo
             return Null(type);
     }
     const auto layout = registry.addon(type).layout;
-    if (layout == Layout::i64)
-        return std::bit_cast<std::int64_t>(reader.u64());
+    if (layout == Layout::i64) {
+        auto payload = std::bit_cast<std::int64_t>(reader.u64());
+        return type == integer() ? Value(payload) : compact(type, payload);
+    }
     if (layout == Layout::f64)
         return std::bit_cast<double>(reader.u64());
     if (layout == Layout::text)
         return string(reader);
+    if (layout == Layout::i128) {
+        auto lo = reader.u64(), hi = reader.u64();
+        std::array<std::byte, 16> payload{};
+        std::memcpy(payload.data(), &lo, 8);
+        std::memcpy(payload.data() + 8, &hi, 8);
+        return compact(type, payload);
+    }
     auto payload = field(reader);
     return Opaque(type, Bytes(payload.begin(), payload.end()));
 }

@@ -23,6 +23,8 @@ Type type_of(const Value& value) {
             throw Error(ErrorCode::type, "Invalid NULL type");
         return *n->type;
     }
+    if (auto cell = std::get_if<Compact>(&value))
+        return cell->type();
     return std::get<Opaque>(value).type();
 }
 namespace {
