@@ -27,7 +27,7 @@ std::int64_t microseconds(const Value& value) {
     return decode(opaque->bytes());
 }
 void install(Registry& registry) {
-    registry.add(TypeAddon{id, 1, Representation::opaque, parameters,
+    registry.add(TypeAddon{id, 1, Layout::bytes, parameters,
         [](ByteView, const Value& v) { (void)decode(std::get<Opaque>(v).bytes()); },
         [](ByteView, const Value& a, const Value& b) { return decode(std::get<Opaque>(a).bytes()) == decode(std::get<Opaque>(b).bytes()); },
         [](ByteView, const Value& a, const Value& b) {

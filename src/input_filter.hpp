@@ -18,10 +18,10 @@ inline std::optional<std::pair<Tables, Query>> prepare_join_inputs(const Tables&
         for (const auto& branch : query.where->children) {
             auto arm = query;
             arm.where = branch;
-            prefixes.push_back(native_join_prefix(tables, arm));
+            prefixes.push_back(native_join_prefix(tables, arm, registry));
         }
     } else
-        prefixes.push_back(native_join_prefix(tables, query));
+        prefixes.push_back(native_join_prefix(tables, query, registry));
     if (prefixes.empty() ||
         std::any_of(prefixes.begin(), prefixes.end(), [](const auto& prefix) { return prefix.empty(); }))
         return {};

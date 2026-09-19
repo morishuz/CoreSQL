@@ -158,12 +158,12 @@ Value read_value(Reader& reader, const Type& type, const Registry& registry, boo
         if (null)
             return Null(type);
     }
-    const auto representation = registry.addon(type).representation;
-    if (representation == Representation::integer)
+    const auto layout = registry.addon(type).layout;
+    if (layout == Layout::i64)
         return std::bit_cast<std::int64_t>(reader.u64());
-    if (representation == Representation::real)
+    if (layout == Layout::f64)
         return std::bit_cast<double>(reader.u64());
-    if (representation == Representation::text)
+    if (layout == Layout::text)
         return string(reader);
     auto payload = field(reader);
     return Opaque(type, Bytes(payload.begin(), payload.end()));

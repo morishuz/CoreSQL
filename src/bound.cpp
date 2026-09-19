@@ -255,12 +255,12 @@ BoundExpr bind(const Expr& expression, const Scope& table, const Registry& regis
         if (!existence && shape.types.size() != 1)
             fail(ErrorCode::schema, "Scalar subquery must return one column");
         result.type = existence ? integer() : shape.types[0];
-        auto source = correlated_source(*tables, *expression.subquery, expression.parameters);
-        auto cache =
-            expression.subquery->repeatable &&
-                    std::all_of(types.begin(), types.end(), [](const Type& t) { return t == integer(); })
-                ? std::make_shared<SubqueryCache>()
-                : nullptr;
+        auto source = correlated_source(*tables, *expression.subquery, expression.parameters, registry);
+        auto cache = expression.subquery->repeatable &&
+                             std::all_of(types.begin(), types.end(),
+                                         [&](const Type& t) { return native_i64(registry.addon(t)); })
+                         ? std::make_shared<SubqueryCache>()
+                         : nullptr;
         result.subquery = [tables, &registry, substitute, type = result.type, existence, source,
                            cache](std::span<const Value> values) mutable -> Value {
             auto evaluate = [&]() -> Value {

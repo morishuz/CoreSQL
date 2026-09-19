@@ -8,11 +8,11 @@ namespace coresql::sql::detail {
 inline auto membership_factory(Registry registry, std::optional<Type> affinity = {}) {
     return [registry = std::move(registry), affinity = std::move(affinity)](
                const Type& type, std::span<const Value> candidates) -> std::function<bool(const Value&)> {
-        if ((type != integer() && type != text()) || (affinity && type != *affinity))
-            return {};
         const auto& addon = registry.addon(type);
-        if (!addon.canonical_scalar || !registry.addon(integer()).canonical_scalar || !addon.hash ||
-            !addon.equal || !addon.compare)
+        if ((addon.layout != Layout::i64 && addon.layout != Layout::text) || (affinity && type != *affinity))
+            return {};
+        if (!addon.native_ops || !registry.addon(integer()).native_ops || !addon.hash || !addon.equal ||
+            !addon.compare)
             return {};
         auto hash = [f = addon.hash](const Value& v) { return f({}, v); };
         auto equal = [f = addon.equal](const Value& a, const Value& b) { return f({}, a, b); };

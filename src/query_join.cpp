@@ -133,8 +133,8 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
     if (key && key->leaf && key->leaf->operation == Compare::equal) {
         const auto& a = key->leaf->left;
         const auto& b = key->leaf->right;
-        if (a.kind == Expr::Kind::column && b.kind == Expr::Kind::column && a.type == integer() &&
-            b.type == integer()) {
+        if (a.kind == Expr::Kind::column && b.kind == Expr::Kind::column &&
+            native_i64(registry.addon(a.type)) && native_i64(registry.addon(b.type))) {
             auto x = a.index, y = b.index;
             if (x >= left.columns.size())
                 std::swap(x, y);
@@ -165,8 +165,7 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
             }
         };
         if (key_columns && !is_null(a[key_columns->first])) {
-            for (auto i :
-                 lookup.find(rights, key_columns->second, std::get<std::int64_t>(a[key_columns->first])))
+            for (auto i : lookup.find(rights, key_columns->second, i64_payload(a[key_columns->first])))
                 candidate(i);
         } else {
             for (std::size_t i = 0; i < rights.size(); ++i)
@@ -213,8 +212,8 @@ Result run_multi_join(const Tables& tables, const Query& query, const Registry& 
             scope.left_alias = query.alias;
             scope.right = require_table(tables, join.table).get();
             scope.right_alias = join.alias;
-            if (join.cross || (scope.resolve(join.left).second == integer() &&
-                               scope.resolve(join.right).second == integer())) {
+            if (join.cross || (native_i64(registry.addon(scope.resolve(join.left).second)) &&
+                               native_i64(registry.addon(scope.resolve(join.right).second)))) {
                 auto direct = query;
                 direct.joins.clear();
                 direct.join = join;
@@ -251,7 +250,7 @@ Result run_multi_join(const Tables& tables, const Query& query, const Registry& 
             source.select.push_back(column(query.alias, c.name));
     if (!query.limit)
         source.limit = 0;
-    auto prefix = native_join_prefix(tables, query);
+    auto prefix = native_join_prefix(tables, query, registry);
     auto source_early =
         query.source_where
             ? std::optional<Predicate>{}
@@ -289,8 +288,9 @@ Result run_multi_join(const Tables& tables, const Query& query, const Registry& 
         if (name.empty())
             return false;
         const auto& schema = require_table(tables, name)->columns;
-        return std::any_of(schema.begin(), schema.end(),
-                           [&](const Column& c) { return c.name == e.name && c.type == integer(); });
+        return std::any_of(schema.begin(), schema.end(), [&](const Column& c) {
+            return c.name == e.name && native_i64(registry.addon(c.type));
+        });
     };
     std::size_t stage = 0;
     for (auto join : query.joins) {

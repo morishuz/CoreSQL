@@ -21,19 +21,20 @@ std::optional<Query> prepare_membership_join(const Tables& tables, const Query& 
             return {};
         sources.emplace(join.alias, join.table);
     }
-    auto integer_column = [&](const Expr& e) {
+    auto i64_column = [&](const Expr& e) {
         if (e.kind != Expr::Kind::column || !sources.contains(e.qualifier))
             return false;
         const auto& columns = require_table(tables, sources.at(e.qualifier))->columns;
-        return std::any_of(columns.begin(), columns.end(),
-                           [&](const Column& c) { return c.name == e.name && c.type == integer(); });
+        return std::any_of(columns.begin(), columns.end(), [&](const Column& c) {
+            return c.name == e.name && native_i64(registry.addon(c.type));
+        });
     };
-    if (!integer_column(member.arguments[0]))
+    if (!i64_column(member.arguments[0]))
         return {};
     for (std::size_t i = 1; i < query.where->children.size(); ++i) {
         const auto& p = query.where->children[i];
-        if (p.kind != Predicate::Kind::comparison || p.operation != Compare::equal ||
-            !integer_column(p.left) || !integer_column(p.right))
+        if (p.kind != Predicate::Kind::comparison || p.operation != Compare::equal || !i64_column(p.left) ||
+            !i64_column(p.right))
             return {};
     }
     // A first predicate is not reached when any Cartesian input is empty.

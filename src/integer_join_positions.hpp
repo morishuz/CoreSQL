@@ -20,7 +20,7 @@ public:
                 if (is_null(value))
                     nulls.push_back(i);
                 else
-                    buckets[std::get<std::int64_t>(value)].push_back(i);
+                    buckets[i64_payload(value)].push_back(i);
 #ifdef CORESQL_TESTING
                 if (auto* counters = active_query_counters)
                     ++counters->hash_build_rows;

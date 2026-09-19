@@ -26,11 +26,11 @@ Type type_of(const Value& value) {
     return std::get<Opaque>(value).type();
 }
 namespace {
-template <class T> TypeAddon scalar(Type type, Representation representation) {
+template <class T> TypeAddon scalar(Type type, Layout layout) {
     TypeAddon result;
     result.id = std::move(type.id);
-    result.representation = representation;
-    result.canonical_scalar = true;
+    result.layout = layout;
+    result.native_ops = true;
     result.validate_type = [](ByteView p) {
         if (!p.empty())
             throw Error(ErrorCode::type, "Scalar type has no parameters");
@@ -52,8 +52,8 @@ template <class T> TypeAddon scalar(Type type, Representation representation) {
 }
 } // namespace
 void install_scalar_types(Registry& registry) {
-    registry.add(scalar<std::int64_t>(integer(), Representation::integer));
-    registry.add(scalar<double>(real(), Representation::real));
-    registry.add(scalar<std::string>(text(), Representation::text));
+    registry.add(scalar<std::int64_t>(integer(), Layout::i64));
+    registry.add(scalar<double>(real(), Layout::f64));
+    registry.add(scalar<std::string>(text(), Layout::text));
 }
 } // namespace coresql

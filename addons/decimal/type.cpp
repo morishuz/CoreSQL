@@ -355,7 +355,7 @@ std::int64_t to_integer(const Value& v, bool truncate) {
     return static_cast<std::int64_t>(n);
 }
 void install(Registry& r) {
-    r.add(TypeAddon{id, 1, Representation::opaque, [](ByteView p) { (void)parameter_format(p); },
+    r.add(TypeAddon{id, 1, Layout::bytes, [](ByteView p) { (void)parameter_format(p); },
                     [](ByteView, const Value& v) { (void)coefficient(v); },
                     [](ByteView, const Value& a, const Value& b) { return coefficient(a) == coefficient(b); },
                     [](ByteView, const Value& a, const Value& b) { return compare(a, b); },

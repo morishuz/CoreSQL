@@ -4,7 +4,8 @@
 namespace coresql::detail::execution {
 // Retain the final WHERE and physical join order. Only a leading, non-failing
 // native scalar comparison prefix can reject rows before intermediate materialization.
-inline std::vector<Predicate> native_join_prefix(const Tables& tables, const Query& query) {
+inline std::vector<Predicate> native_join_prefix(const Tables& tables, const Query& query,
+                                                 const Registry& registry) {
     if (!query.limit || !query.repeatable || !query.where)
         return {};
     std::map<std::string, std::string> sources{{query.alias, query.table}};
@@ -24,10 +25,14 @@ inline std::vector<Predicate> native_join_prefix(const Tables& tables, const Que
                 return c.type;
         return {};
     };
-    auto integer_operand = [&](const Expr& e) { return operand_type(e) == integer(); };
+    auto i64_operand = [&](const Expr& e) {
+        auto type = operand_type(e);
+        return type && native_i64(registry.addon(*type));
+    };
+    auto native_operand = [&](const Type& type) { return native_scalar(registry.addon(type)); };
     // Earlier pruning must not skip a potentially failing later ON operation.
     for (const auto& join : query.joins)
-        if (!join.cross && (!integer_operand(join.left) || !integer_operand(join.right)))
+        if (!join.cross && (!i64_operand(join.left) || !i64_operand(join.right)))
             return {};
     std::vector<Predicate> result;
     std::function<bool(const Predicate&)> collect = [&](const Predicate& p) {
@@ -38,19 +43,18 @@ inline std::vector<Predicate> native_join_prefix(const Tables& tables, const Que
             return true;
         }
         auto left = operand_type(p.left), right = operand_type(p.right);
-        if (p.kind != Predicate::Kind::comparison || left != right ||
-            (left != integer() && left != real() && left != text()))
+        if (p.kind != Predicate::Kind::comparison || left != right || !left || !native_operand(*left))
             return false;
         result.push_back(p);
         return true;
     };
     const bool complete = collect(*query.where);
-    // With a source filter, only the complete native integer column predicate
+    // With a source filter, only the complete native i64 column predicate
     // is eligible, and consumers must apply it after that filter has completed.
     if (query.source_where &&
         (!complete || !std::all_of(result.begin(), result.end(), [&](const Predicate& p) {
             return p.left.kind == Expr::Kind::column && p.right.kind == Expr::Kind::column &&
-                   integer_operand(p.left) && integer_operand(p.right);
+                   i64_operand(p.left) && i64_operand(p.right);
         })))
         return {};
     return result;

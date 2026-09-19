@@ -84,7 +84,7 @@ void install(Registry& registry) {
                         .year()));
         }});
     registry.add(
-        TypeAddon{id, 1, Representation::opaque,
+        TypeAddon{id, 1, Layout::bytes,
                   [](ByteView p) {
                       if (!p.empty())
                           throw Error(ErrorCode::type, "DATE has no type parameters");

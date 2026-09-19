@@ -40,7 +40,7 @@ int main() {
         q.limit = 0;
         CHECK(db.query(q).rows.empty());
         auto custom = r.addon(integer());
-        custom.canonical_scalar = false;
+        custom.native_ops = false;
         auto compare = custom.compare;
         custom.compare = [compare](ByteView p, const Value& a, const Value& b) { return -compare(p, a, b); };
         Registry other(false);

@@ -25,7 +25,7 @@ public:
                     ++counters->hash_build_rows;
 #endif
                 if (!is_null(row[column]))
-                    (*buckets)[std::get<std::int64_t>(row[column])].push_back(&row);
+                    (*buckets)[i64_payload(row[column])].push_back(&row);
                 return true;
             });
             selective = buckets->size() <= 128;

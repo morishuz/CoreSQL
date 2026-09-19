@@ -7,6 +7,8 @@ compatibility and permanent storage-format compatibility are not guaranteed.
 
 ### Core and persistence
 
+- Type add-ons declare a closed `layout` and optional `native_ops`. Query
+  execution specializes on those, not on integer type identity.
 - Typed relational API with joins, grouping, aggregates, ordering, indexes and
   correlated subqueries; statement-atomic mutations and snapshot transactions.
 - Durable logs, checkpoints, backup/restore, integrity checks, named savepoints

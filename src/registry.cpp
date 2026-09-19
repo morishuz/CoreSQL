@@ -6,8 +6,8 @@ namespace {
 [[noreturn]] void fail(ErrorCode code, const std::string& message) { throw Error(code, message); }
 void validate_value(const TypeAddon& addon, const Type& type, const Value& value) {
     if (is_null(value)) { if (type_of(value) != type) fail(ErrorCode::type, "NULL type mismatch"); return; }
-    if (value.index() != static_cast<std::size_t>(addon.representation) ||
-        (addon.representation == Representation::opaque && std::get<Opaque>(value).type() != type))
+    if (value.index() != static_cast<std::size_t>(addon.layout) ||
+        (addon.layout == Layout::bytes && std::get<Opaque>(value).type() != type))
         fail(ErrorCode::type, "Value does not match column/function type: " + type.id);
     addon.validate_value(type.parameters, value);
 }
@@ -29,15 +29,15 @@ Registry::Registry(bool scalar_types) {
 }
 void Registry::add(TypeAddon type) {
     if (type.id.empty() || !type.version || !type.validate_type || !type.validate_value ||
-        static_cast<std::size_t>(type.representation) > 3)
+        static_cast<std::size_t>(type.layout) > 3)
         fail(ErrorCode::type, "Invalid type registration");
-    // Compact Value alternatives have one canonical identity. Other types use Opaque.
-    if (type.representation != Representation::opaque) {
+    // Compact layouts still have one default identity each. Other types use bytes.
+    if (type.layout != Layout::bytes) {
         const Type canonical[] = {integer(), real(), text()};
-        if (type.id != canonical[static_cast<std::size_t>(type.representation)].id || type.version != 1)
-            fail(ErrorCode::type, "Native representation requires its canonical identity");
+        if (type.id != canonical[static_cast<std::size_t>(type.layout)].id || type.version != 1)
+            fail(ErrorCode::type, "Compact layout requires its default identity");
     } else if (type.id == integer().id || type.id == real().id || type.id == text().id)
-        fail(ErrorCode::type, "Native identity requires its native representation");
+        fail(ErrorCode::type, "Default identity requires its compact layout");
     auto key = std::make_pair(type.id, type.version);
     if (!types_.emplace(std::move(key), std::move(type)).second) fail(ErrorCode::type, "Duplicate type registration");
 }

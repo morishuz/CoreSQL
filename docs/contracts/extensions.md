@@ -11,12 +11,13 @@ type is absent. Database construction copies the registry and freezes its contra
 | Member | Responsibility |
 | --- | --- |
 | `id`, `version` | Stable identity; change version when encoding or semantics change |
-| `representation` | One of the compact `Value` alternatives; custom identities use immutable `Opaque` bytes |
+| `layout` | Closed cell shape: `i64`, `f64`, `text`, or `bytes`. Identity is open; a type chooses one layout |
 | `validate_type(parameters)` | Check an instance, such as a vector's fixed dimension |
 | `validate_value(parameters, value)` | Check a value entering the engine |
 | `equal(parameters, a, b)` | Optional equality |
 | `compare(parameters, a, b)` | Optional negative/zero/positive total ordering |
 | `hash(parameters, value)` | Optional hash; equal values must hash identically |
+| `native_ops` | Opt-in: equal/compare/hash are the layout's native C operators |
 
 Callbacks operate on `const Value&`; integers and doubles stay inline, and strings
 stay strings. Extensibility does not force a byte allocation for native numbers. Opaque values
@@ -28,18 +29,20 @@ whose callbacks naturally consume `ByteView`. The adapter produces the same
 remain equality-only, with fixed or variable dimensions; boxes have equality
 but no public ordering. Unsupported operations fail during query binding.
 
-The compact native representations have canonical identities because an ordinary
-`int64_t` value has no separate type tag. Custom identities use `Opaque(Type,
-Bytes)`. The engine frames these bytes; the extension owns their encoding and
-validation. Changing arbitrary physical row layouts is not part of this API.
-The existing payload/peak counters remain representation-based logical sizes,
-not a measurement of all extension/index allocations.
+`i64`, `f64` and `text` have default identities (`core.integer`, `core.real`,
+`core.text`) because an ordinary `int64_t` value has no separate type tag. Only
+those identities may use the compact layouts in this phase; custom identities use
+`Opaque` bytes (`Layout::bytes`). The engine frames these bytes; the extension
+owns their encoding and validation. Changing arbitrary physical row layouts is
+not part of this API. Execution specializes on `layout` plus `native_ops`, not on
+type identity. The existing payload/peak counters remain layout-based logical
+sizes, not a measurement of all extension/index allocations.
 
-`TypeAddon::canonical_scalar` is false by default. The built-in integer, real
-and text providers set it to certify standard scalar validation, equality,
-ordering and compatible hashing. Providers that customize these semantics,
-including copies of a built-in provider, must clear this flag. Representation
-alone does not certify these semantics.
+`TypeAddon::native_ops` is false by default. The built-in integer, real and text
+providers set it to certify that equality, ordering and hashing are the layout's
+native C operators. Providers that customize those semantics, including copies of
+a built-in provider, must clear this flag. Layout alone does not certify these
+semantics.
 
 Bound comparisons resolve the registered callback once and trust validated
 operands. Public registry comparisons validate arbitrary caller values. Scalar
@@ -61,10 +64,9 @@ This opt-in certifies equivalent, total, side-effect-free equality and permits
 skipping repeated equality/result-validation calls. Core retains empty-set and
 NULL truth handling. Preparation is lazy and confined to constant candidate lists
 or cached repeatable uncorrelated subquery results. Mixed types and dynamic
-candidate expressions retain the normal path. SQL's implementation uses the
-canonical-scalar flag for both keys and integer truth results, and only when
-affinity leaves the bound key type unchanged. Small lists use direct comparisons;
-larger sets use hash lookup.
+candidate expressions retain the normal path. SQL's implementation uses `native_ops` for both keys and integer
+truth results, and only when affinity leaves the bound key type unchanged. Small
+lists use direct comparisons; larger sets use hash lookup.
 
 Callbacks are trusted application code, deterministic, non-reentrant and free
 of database mutations. Captured resources must outlive their use, typically via

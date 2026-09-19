@@ -6,7 +6,7 @@
 #include <unordered_map>
 
 namespace coresql::detail::execution {
-// A statement-local candidate index for a leading integer equality against a
+// A statement-local candidate index for a leading native i64 equality against a
 // captured parameter. NULL keys remain candidates because UNKNOWN can reach a
 // later failing predicate. The complete WHERE is evaluated on the candidate rows.
 class CorrelatedSource {
@@ -28,7 +28,7 @@ public:
                 if (is_null(value))
                     nulls.push_back(location);
                 else
-                    keys[std::get<std::int64_t>(value)].push_back(location);
+                    keys[i64_payload(value)].push_back(location);
 #ifdef CORESQL_TESTING
                 if (auto* counters = active_query_counters)
                     ++counters->correlation_index_rows;
@@ -37,7 +37,7 @@ public:
             });
             built = true;
         }
-        auto found = keys.find(std::get<std::int64_t>(values[parameter]));
+        auto found = keys.find(i64_payload(values[parameter]));
         std::vector<RowLocation> selected = nulls;
         if (found != keys.end())
             selected.insert(selected.end(), found->second.begin(), found->second.end());
@@ -48,7 +48,8 @@ public:
     }
 };
 inline std::shared_ptr<CorrelatedSource> correlated_source(const Tables& tables, const Query& query,
-                                                           const std::vector<std::string>& parameters) {
+                                                           const std::vector<std::string>& parameters,
+                                                           const Registry& registry) {
     if (!query.repeatable || query.table.empty() || !query.where || query.join || !query.joins.empty() ||
         !query.relations.empty() || !query.compounds.empty() || query.source_where || query.search)
         return {};
@@ -69,7 +70,7 @@ inline std::shared_ptr<CorrelatedSource> correlated_source(const Tables& tables,
     Scope scope(*table);
     scope.left_alias = query.alias;
     auto [column, type] = scope.resolve(left);
-    if (type != integer())
+    if (!native_i64(registry.addon(type)))
         return {};
     // Existing equality indexes already provide candidates without building a
     // duplicate query-local index or replacing their source with a private view.
@@ -81,7 +82,7 @@ inline std::shared_ptr<CorrelatedSource> correlated_source(const Tables& tables,
                                               static_cast<std::size_t>(parameter - parameters.begin()));
 }
 
-// Cache only successful results of explicitly repeatable queries with integer
+// Cache only successful results of explicitly repeatable queries with native i64
 // captures. Clearing at the capacity bounds entry count without retaining state
 // beyond this bound expression or snapshot.
 class SubqueryCache {
@@ -93,7 +94,7 @@ public:
         Key key;
         key.reserve(values.size());
         for (const auto& value : values)
-            key.push_back(is_null(value) ? std::optional<std::int64_t>{} : std::get<std::int64_t>(value));
+            key.push_back(is_null(value) ? std::optional<std::int64_t>{} : i64_payload(value));
         if (auto found = entries.find(key); found != entries.end()) {
 #ifdef CORESQL_TESTING
             if (auto* counters = active_query_counters)

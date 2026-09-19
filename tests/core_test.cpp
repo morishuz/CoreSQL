@@ -47,6 +47,22 @@ int main() { return tests([] {
     expect(ErrorCode::schema, [&] { tx.create_table("duplicate", {{"id", integer()}, {"id", integer()}}); });
     expect(ErrorCode::type, [&] { tx.create_table("unknown", {{"v", {"absent", 1, {}}}}); });
     expect(ErrorCode::type, [&] { tx.create_table("invalid_builtin", {{"v", {"core.integer", 2, {}}}}); });
+    {
+        Registry locked;
+        TypeAddon days;
+        days.id = "test.days";
+        days.version = 1;
+        days.layout = Layout::i64;
+        days.validate_type = [](ByteView p) { if (!p.empty()) throw Error(ErrorCode::type, "No parameters"); };
+        days.validate_value = [](ByteView, const Value&) {};
+        expect(ErrorCode::type, [&] { locked.add(days); });
+        auto stolen = locked.addon(integer());
+        stolen.id = "test.days";
+        expect(ErrorCode::type, [&] { Registry other; other.add(stolen); });
+        stolen = locked.addon(integer());
+        stolen.layout = Layout::bytes;
+        expect(ErrorCode::type, [&] { Registry other; other.add(stolen); });
+    }
     expect(ErrorCode::schema, [&] { tx.query(Query{"empty", {column("missing")}, {}, {}, 0}); });
     expect(ErrorCode::type, [&] { tx.query(Query{"empty", {call("missing", {})}}); });
     expect(ErrorCode::type, [&] { tx.query(Query{"empty", {}, Predicate{column("id"), Compare::equal, literal(1.0)}}); });

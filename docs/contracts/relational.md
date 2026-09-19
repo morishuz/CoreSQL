@@ -271,14 +271,14 @@ position; UNKNOWN and later errors remain observable. Reuse ends at the first
 right-dependent predicate, includes subquery captures in dependency checks, and
 never crosses a scan or snapshot boundary.
 
-Single-key repeatable integer grouping uses a hash lookup when the provider
-certifies canonical scalar semantics. NULL has its own group. Aggregate inputs
+Single-key repeatable grouping uses a hash lookup when the key layout is `i64`
+and the provider certifies `native_ops`. NULL has its own group. Aggregate inputs
 retain their arrival order, and groups are sorted before aggregate finalization
 to preserve key/finish order. Other keys and custom providers retain ordered
 lookup.
 
 A bounded disjunctive-join rule handles two-table Cartesian inner joins when
-every top-level OR arm starts with the same native integer column equality.
+every top-level OR arm starts with the same native i64 column equality.
 It preserves FROM order and the entire WHERE predicate, while using the equality
 to avoid materializing mismatched pairs. Reversed equality operands are accepted.
 The rule checks the current snapshot and falls back if either key contains NULL:

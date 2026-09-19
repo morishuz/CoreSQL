@@ -72,8 +72,9 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
     for (const auto& key : query.order_by) {
         auto expression = bind(key.expression, scope, registry);
         auto comparison = detail::Comparison(registry, expression.type, false);
+        auto layout = registry.addon(expression.type).layout;
         bool borrowed = (expression.kind == Expr::Kind::column || expression.kind == Expr::Kind::literal) &&
-                        registry.addon(expression.type).representation >= Representation::text;
+                        (layout == Layout::text || layout == Layout::bytes);
         order.push_back({std::move(expression), std::move(comparison), key.descending, borrowed});
     }
     const detail::IndexBinding* search_index = nullptr;
@@ -247,10 +248,9 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
                     return accept(
                         RowView(row, indexed_row(*scope.right, *location), chunk->rowids[position]));
                 }
-                if (!query.join->cross && join_left->type == integer()) {
-                    const auto& candidates =
-                        hash_join.find(*scope.right, join_right->index - table.columns.size(),
-                                       std::get<std::int64_t>(value));
+                if (!query.join->cross && native_i64(registry.addon(join_left->type))) {
+                    const auto& candidates = hash_join.find(
+                        *scope.right, join_right->index - table.columns.size(), i64_payload(value));
                     for (const auto* other : candidates) {
 #ifdef CORESQL_TESTING
                         if (auto* counters = detail::active_query_counters)

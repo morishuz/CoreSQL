@@ -76,22 +76,33 @@ struct EncodedTypeAddon {
     std::function<bool(ByteView parameters, ByteView a, ByteView b)> equal;
     std::function<int(ByteView parameters, ByteView a, ByteView b)> compare;
 };
-// Native alternatives are compact storage representations, not privileged types.
-enum class Representation { integer, real, text, opaque };
+// Closed cell layouts. Identity is open; a type chooses one of these payloads.
+// i64/f64/text have default identities (integer/real/text) and may be untagged.
+enum class Layout { i64, f64, text, bytes };
 struct TypeAddon {
     std::string id;
     std::uint32_t version = 1;
-    Representation representation = Representation::opaque;
+    Layout layout = Layout::bytes;
     std::function<void(ByteView)> validate_type;
     std::function<void(ByteView, const Value&)> validate_value;
     std::function<bool(ByteView, const Value&, const Value&)> equal;
     std::function<int(ByteView, const Value&, const Value&)> compare;
     // Equal values must hash identically, including alternative encodings.
     std::function<std::size_t(ByteView, const Value&)> hash;
-    // Opt-in: standard integer/real/text validation and comparison semantics.
+    // Opt-in: equal/compare/hash are the layout's native C operators.
     // Providers customizing those semantics must leave this false.
-    bool canonical_scalar = false;
+    bool native_ops = false;
 };
+inline bool native_i64(const TypeAddon& addon) {
+    return addon.layout == Layout::i64 && addon.native_ops;
+}
+inline bool native_scalar(const TypeAddon& addon) {
+    return addon.native_ops && addon.layout != Layout::bytes;
+}
+// Payload of an untagged i64 cell (Layout::i64's default identity).
+inline std::int64_t i64_payload(const Value& value) {
+    return std::get<std::int64_t>(value);
+}
 TypeAddon encoded_type(EncodedTypeAddon);
 void install_scalar_types(class Registry&);
 

@@ -5,7 +5,7 @@
 #include <unordered_map>
 
 namespace coresql::detail {
-// Input keys are validated and borrowed. Native integer groups use a hash index;
+// Input keys are validated and borrowed. Native i64 groups use a hash index;
 // final traversal retains ordered grouping's key and aggregate-finish order.
 template <class State> class GroupTable {
     QueryRowLess less_;
@@ -18,9 +18,7 @@ template <class State> class GroupTable {
 public:
     GroupTable(const Registry& registry, std::span<const Type> types, bool repeatable)
         : less_(registry, types, repeatable),
-          native_(repeatable && types.size() == 1 && types[0] == integer() &&
-                  registry.addon(integer()).canonical_scalar),
-          ordered_(less_) {}
+          native_(repeatable && types.size() == 1 && native_i64(registry.addon(types[0]))), ordered_(less_) {}
 
     template <class Create> State& get(std::span<const Value> key, Create create) {
         if (!native_) {
@@ -33,14 +31,14 @@ public:
         if (missing) {
             if (null_)
                 return entries_[*null_].second;
-        } else if (auto found = integers_.find(std::get<std::int64_t>(key[0])); found != integers_.end())
+        } else if (auto found = integers_.find(i64_payload(key[0])); found != integers_.end())
             return entries_[found->second].second;
         const auto index = entries_.size();
         entries_.emplace_back(Row(key.begin(), key.end()), create());
         if (missing)
             null_ = index;
         else
-            integers_.emplace(std::get<std::int64_t>(key[0]), index);
+            integers_.emplace(i64_payload(key[0]), index);
         return entries_.back().second;
     }
 

@@ -27,7 +27,7 @@ int main() {
         // A provider which has not promised total comparison retains short-circuit errors.
         Registry custom(false), defaults;
         auto integers = defaults.addon(integer());
-        integers.canonical_scalar = false;
+        integers.native_ops = false;
         integers.equal = [](ByteView, const Value& a, const Value& b) {
             if (std::get<std::int64_t>(b) == 99)
                 throw Error(ErrorCode::constraint, "comparison failure");
@@ -53,7 +53,7 @@ int main() {
         CHECK(is_null(c.execute("SELECT 'z' IN ('a','b','c','d','e','f','g','h','i','j',NULL)").rows[0][0]));
         Registry truth(false);
         auto truth_type = defaults.addon(integer());
-        truth_type.canonical_scalar = false;
+        truth_type.native_ops = false;
         truth_type.validate_value = [](ByteView, const Value& v) {
             if (v == Value(std::int64_t{1}))
                 throw Error(ErrorCode::constraint, "truth validation");
