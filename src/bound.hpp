@@ -118,7 +118,8 @@ struct BoundExpr {
                         continue;
                     std::array<Value, 2> values{base, std::move(condition)};
                     condition = function->invoke(values);
-                    registry.validate(condition, integer());
+                    if (type_of(condition) != integer() || !registry.addon(integer()).native_ops)
+                        registry.validate(condition, integer());
                 }
                 if (!is_null(condition) && std::get<std::int64_t>(condition))
                     return arguments[i].evaluate(row, registry);
@@ -143,7 +144,10 @@ struct BoundExpr {
         if (!function->accepts_null && std::any_of(values.begin(), values.end(), is_null))
             return Null(type);
         auto result = prepared ? prepared(values) : function->invoke(values);
-        registry.validate(result, type);
+        // Bound results of native_ops types are trusted when the cell identity matches.
+        // Insert, recovery and public Registry::validate still check every value.
+        if (is_null(result) || type_of(result) != type || !registry.addon(type).native_ops)
+            registry.validate(result, type);
         return result;
     }
 };

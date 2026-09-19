@@ -16,6 +16,8 @@ compatibility and permanent storage-format compatibility are not guaranteed.
   little-endian days/microseconds.
 - DECIMAL stores a compact `i128` coefficient; on-disk bytes match the previous
   Opaque encoding.
+- Bound function evaluation skips per-row result validation for `native_ops`
+  types when the returned identity already matches.
 - Typed relational API with joins, grouping, aggregates, ordering, indexes and
   correlated subqueries; statement-atomic mutations and snapshot transactions.
 - Durable logs, checkpoints, backup/restore, integrity checks, named savepoints

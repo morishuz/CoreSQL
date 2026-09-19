@@ -49,7 +49,9 @@ semantics.
 
 Bound comparisons resolve the registered callback once and trust validated
 operands. Public registry comparisons validate arbitrary caller values. Scalar
-functions infer result types at binding and return values checked at execution.
+functions infer result types at binding. Bound evaluation skips per-row result
+validation when the returned cell matches a `native_ops` result type; other
+results, NULLs, inserts and recovery still validate.
 A function may additionally supply `prepare(argument_types, result_type)`, returning
 an invocation callback specialized for those types. Preparation runs after result
 type validation, including for empty input and LIMIT 0; it must depend only on
