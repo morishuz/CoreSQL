@@ -18,6 +18,8 @@ compatibility and permanent storage-format compatibility are not guaranteed.
   Opaque encoding.
 - Bound function evaluation skips per-row result validation for `native_ops`
   types when the returned identity already matches.
+- The bundled hash index stores native i64 keys in hash tables instead of
+  ordered maps, including DATE and TIMESTAMP primary keys.
 - Typed relational API with joins, grouping, aggregates, ordering, indexes and
   correlated subqueries; statement-atomic mutations and snapshot transactions.
 - Durable logs, checkpoints, backup/restore, integrity checks, named savepoints

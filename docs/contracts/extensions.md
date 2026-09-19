@@ -240,10 +240,12 @@ Extracted-key `contains` is also available in mutation filters, and independentl
 of an index. Only a leading eligible predicate can select rows; later predicates
 are not reordered ahead of potentially throwing functions.
 
-The bundled hash index uses the type's hash and ordering callbacks with the
-existing 256 COW map buckets. Its ordering must agree with equality: compare
-returns zero exactly for equal keys, and equal keys have the same hash. Collisions
-are allowed. Timestamp keys use precisely this implementation; no timestamp
+The bundled hash index uses 256 copy-on-write buckets. Native i64 keys
+(`layout == i64` and `native_ops`) use hash tables of the payload; other keys
+use the type's hash and ordering callbacks with ordered maps. Ordering must
+agree with equality: compare returns zero exactly for equal keys, and equal keys
+have the same hash. Collisions are allowed. Timestamp keys use precisely this
+implementation; no timestamp
 branches exist in the engine. Hash results need not be persistent because indexes
 are rebuilt from rows.
 
