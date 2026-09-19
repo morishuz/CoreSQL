@@ -63,6 +63,7 @@ struct BoundExpr {
     std::size_t index = 0;
     Value value = std::int64_t{0};
     const Function* function = nullptr;
+    bool trust_native = false;
     std::vector<BoundExpr> arguments;
     std::function<Value(std::span<const Value>)> subquery = {};
     std::function<Value(std::span<const Value>)> prepared = {};
@@ -118,7 +119,7 @@ struct BoundExpr {
                         continue;
                     std::array<Value, 2> values{base, std::move(condition)};
                     condition = function->invoke(values);
-                    if (type_of(condition) != integer() || !registry.addon(integer()).native_ops)
+                    if (!std::holds_alternative<std::int64_t>(condition))
                         registry.validate(condition, integer());
                 }
                 if (!is_null(condition) && std::get<std::int64_t>(condition))
@@ -146,7 +147,12 @@ struct BoundExpr {
         auto result = prepared ? prepared(values) : function->invoke(values);
         // Bound results of native_ops types are trusted when the cell identity matches.
         // Insert, recovery and public Registry::validate still check every value.
-        if (is_null(result) || type_of(result) != type || !registry.addon(type).native_ops)
+        bool matches = false;
+        if (auto* cell = std::get_if<Compact>(&result))
+            matches = cell->type() == type;
+        else if (!is_null(result))
+            matches = type_of(result) == type;
+        if (!trust_native || !matches)
             registry.validate(result, type);
         return result;
     }

@@ -20,6 +20,8 @@ compatibility and permanent storage-format compatibility are not guaranteed.
   types when the returned identity already matches.
 - The bundled hash index stores native i64 keys in hash tables instead of
   ordered maps, including DATE and TIMESTAMP primary keys.
+- Compact cells intern types without allocating on hits, encode DECIMAL inline,
+  and pack payload width into the type pointer so `Value` stays 32 bytes.
 - Typed relational API with joins, grouping, aggregates, ordering, indexes and
   correlated subqueries; statement-atomic mutations and snapshot transactions.
 - Durable logs, checkpoints, backup/restore, integrity checks, named savepoints

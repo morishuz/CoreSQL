@@ -1,21 +1,61 @@
 #include "comparison.hpp"
 #include "key_index.hpp"
+#include <algorithm>
 #include <cstring>
+#include <map>
 #include <mutex>
-#include <tuple>
+#include <string_view>
 
 namespace coresql {
 namespace {
 [[noreturn]] void fail(ErrorCode code, const std::string& message) { throw Error(code, message); }
-const Type& intern_type(Type type) {
-    using Key = std::tuple<std::string, std::uint32_t, Bytes>;
+struct InternKey {
+    std::string id;
+    std::uint32_t version = 1;
+    Bytes parameters;
+};
+struct InternView {
+    std::string_view id;
+    std::uint32_t version;
+    ByteView parameters;
+};
+bool intern_less(std::string_view a_id, std::uint32_t a_version, ByteView a_parameters, std::string_view b_id,
+                 std::uint32_t b_version, ByteView b_parameters) {
+    if (int c = a_id.compare(b_id); c != 0)
+        return c < 0;
+    if (a_version != b_version)
+        return a_version < b_version;
+    return std::lexicographical_compare(a_parameters.begin(), a_parameters.end(), b_parameters.begin(),
+                                        b_parameters.end());
+}
+struct InternLess {
+    using is_transparent = void;
+    bool operator()(const InternKey& a, const InternKey& b) const {
+        return intern_less(a.id, a.version, a.parameters, b.id, b.version, b.parameters);
+    }
+    bool operator()(const InternView& a, const InternKey& b) const {
+        return intern_less(a.id, a.version, a.parameters, b.id, b.version, b.parameters);
+    }
+    bool operator()(const InternKey& a, const InternView& b) const {
+        return intern_less(a.id, a.version, a.parameters, b.id, b.version, b.parameters);
+    }
+};
+const Type& intern_type(const Type& type) {
+    thread_local const Type* cached = nullptr;
+    if (cached && cached->id == type.id && cached->version == type.version &&
+        cached->parameters == type.parameters)
+        return *cached;
     static std::mutex lock;
-    static std::map<Key, Type> table;
+    static std::map<InternKey, Type, InternLess> table;
+    InternView view{type.id, type.version, type.parameters};
     std::lock_guard guard(lock);
-    Key key{type.id, type.version, type.parameters};
-    auto found = table.find(key);
-    if (found == table.end())
-        found = table.emplace(std::move(key), std::move(type)).first;
+    auto found = table.find(view);
+    if (found == table.end()) {
+        InternKey key{type.id, type.version, type.parameters};
+        Type stored{key.id, key.version, key.parameters};
+        found = table.emplace(std::move(key), std::move(stored)).first;
+    }
+    cached = &found->second;
     return found->second;
 }
 void reject_default_identity(const Type& type) {
@@ -54,17 +94,17 @@ void validate_value(const TypeAddon& addon, const Type& type, const Value& value
 
 }
 Opaque::Opaque(Type type, Bytes bytes) : data_(std::make_shared<const Data>(Data{std::move(type), std::move(bytes)})) {}
-Compact::Compact(Type type, std::int64_t payload) : width_(8) {
+Compact::Compact(const Type& type, std::int64_t payload) {
     reject_default_identity(type);
-    type_ = &intern_type(std::move(type));
+    bind(&intern_type(type), 8);
     std::memcpy(payload_.data(), &payload, 8);
 }
-Compact::Compact(Type type, std::array<std::byte, 16> payload) : payload_(payload), width_(16) {
+Compact::Compact(const Type& type, std::array<std::byte, 16> payload) : payload_(payload) {
     reject_default_identity(type);
-    type_ = &intern_type(std::move(type));
+    bind(&intern_type(type), 16);
 }
-Value compact(Type type, std::int64_t payload) { return Compact(std::move(type), payload); }
-Value compact(Type type, std::array<std::byte, 16> payload) { return Compact(std::move(type), payload); }
+Value compact(const Type& type, std::int64_t payload) { return Compact(type, payload); }
+Value compact(const Type& type, std::array<std::byte, 16> payload) { return Compact(type, payload); }
 std::int64_t i64_payload(const Value& value) {
     if (auto* i = std::get_if<std::int64_t>(&value))
         return *i;

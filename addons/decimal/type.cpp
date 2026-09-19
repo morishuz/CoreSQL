@@ -51,11 +51,11 @@ Wide decode(ByteView bytes) {
 Wide coefficient(const Value& v) {
     if (auto i = std::get_if<std::int64_t>(&v))
         return *i;
-    if (!is_decimal(type_of(v)))
+    auto* cell = std::get_if<Compact>(&v);
+    if (!cell || cell->bytes().size() != 16 || !is_decimal(cell->type()))
         throw Error(ErrorCode::type, "Expected DECIMAL");
-    auto f = format_of(type_of(v));
-    auto n = decode(i128_payload(v));
-    auto bound = power(f.precision);
+    auto n = decode(cell->bytes());
+    auto bound = power(format_of(cell->type()).precision);
     if (n <= -bound || n >= bound)
         overflow();
     return n;
@@ -65,12 +65,12 @@ Value value(Wide n, const Type& t) {
     if (n <= -bound || n >= bound)
         overflow();
     auto bits = std::bit_cast<Unsigned>(n);
-    Bytes bytes;
-    bytes.reserve(16);
-    encoding::u64(bytes, static_cast<std::uint64_t>(bits));
-    encoding::u64(bytes, static_cast<std::uint64_t>(bits >> 64));
+    auto lo = static_cast<std::uint64_t>(bits), hi = static_cast<std::uint64_t>(bits >> 64);
     std::array<std::byte, 16> payload{};
-    std::memcpy(payload.data(), bytes.data(), 16);
+    for (unsigned i = 0; i < 8; ++i) {
+        payload[i] = std::byte((lo >> (8 * i)) & 255);
+        payload[i + 8] = std::byte((hi >> (8 * i)) & 255);
+    }
     return compact(t, payload);
 }
 Format numeric(const Type& t) {

@@ -64,22 +64,24 @@ struct Null {
 // Tagged compact cell. Default identities stay untagged; custom i64/i128 use this.
 class Compact {
 public:
-    Compact(Type type, std::int64_t payload);
-    Compact(Type type, std::array<std::byte, 16> payload);
-    const Type& type() const { return *type_; }
-    ByteView bytes() const { return {payload_.data(), width_}; }
+    Compact(const Type& type, std::int64_t payload);
+    Compact(const Type& type, std::array<std::byte, 16> payload);
+    const Type& type() const { return *reinterpret_cast<const Type*>(bits_ & ~std::uintptr_t{1}); }
+    ByteView bytes() const { return {payload_.data(), (bits_ & 1) ? std::size_t{16} : std::size_t{8}}; }
     bool operator==(const Compact& b) const {
         return type() == b.type() && std::ranges::equal(bytes(), b.bytes());
     }
 
 private:
-    const Type* type_;
+    void bind(const Type* type, std::uint8_t width) {
+        bits_ = reinterpret_cast<std::uintptr_t>(type) | std::uintptr_t{width == 16};
+    }
+    std::uintptr_t bits_ = 0;
     std::array<std::byte, 16> payload_{};
-    std::uint8_t width_ = 8;
 };
 using Value = std::variant<std::int64_t, double, std::string, Opaque, Null, Compact>;
-Value compact(Type, std::int64_t);
-Value compact(Type, std::array<std::byte, 16>);
+Value compact(const Type&, std::int64_t);
+Value compact(const Type&, std::array<std::byte, 16>);
 inline bool is_null(const Value& v) {
     return std::holds_alternative<Null>(v);
 }

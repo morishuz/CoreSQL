@@ -1,5 +1,6 @@
 #include "coresql/date.hpp"
 #include <chrono>
+#include <cstring>
 
 namespace coresql::dates {
 namespace {
@@ -12,17 +13,20 @@ void check(std::int64_t count) {
         throw Error(ErrorCode::type, "DATE is outside 0001-01-01..9999-12-31");
 }
 } // namespace
-Type type() {
-    return {id, 1, {}};
+const Type& type() {
+    static const Type identity{id, 1, {}};
+    return identity;
 }
 Value value(std::int64_t unix_days) {
     check(unix_days);
     return compact(type(), unix_days);
 }
 std::int64_t days(const Value& input) {
-    if (type_of(input) != type())
+    auto* cell = std::get_if<Compact>(&input);
+    if (!cell || cell->bytes().size() != 8 || cell->type().id != id || cell->type().version != 1)
         throw Error(ErrorCode::type, "Expected DATE value");
-    auto count = i64_payload(input);
+    std::int64_t count = 0;
+    std::memcpy(&count, cell->bytes().data(), 8);
     check(count);
     return count;
 }
