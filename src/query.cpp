@@ -47,11 +47,6 @@ Result run(const detail::Tables& tables, const Query& query, const Registry& reg
         return run_multi_join(tables, query, registry);
     if (query.join && query.join->right_where)
         return run_filtered_join(tables, query, registry);
-    if (query.join && query.join->kind == JoinKind::inner && query.join->on) {
-        Query next = query;
-        if (lower_inner_on_join(next))
-            return run(tables, next, registry);
-    }
     if (query.join && (query.join->kind != JoinKind::inner || query.join->on))
         return run_general_join(tables, query, registry);
     if (query.source_where)

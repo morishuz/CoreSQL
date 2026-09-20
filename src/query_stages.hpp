@@ -7,7 +7,6 @@ namespace coresql::detail::execution {
 Result run_filtered_join(const Tables&, const Query&, const Registry&);
 Result run_general_join(const Tables&, const Query&, const Registry&);
 Result run_multi_join(const Tables&, const Query&, const Registry&);
-bool lower_inner_on_join(Query&);
 Result run_grouped(const Tables&, const Query&, const Registry&);
 Result run_compound(const Tables&, const Query&, const Registry&);
 Result run_distinct(const Tables&, const Query&, const Registry&);

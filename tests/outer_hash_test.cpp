@@ -56,5 +56,32 @@ int main() {
         CHECK(zero.hash_build_rows == 0 && zero.candidate_pairs == 0);
         c.execute("DELETE FROM a");
         CHECK(c.execute("SELECT * FROM a FULL JOIN b ON a.k=b.k AND fail()=1").rows.size() == 4);
+        // An explicit ON overrides cross, and conjunctions retain their evaluation order.
+        c.execute("CREATE TABLE l(k INTEGER)");
+        c.execute("CREATE TABLE r(k INTEGER)");
+        c.execute("INSERT INTO l VALUES(1)");
+        c.execute("INSERT INTO r VALUES(2)");
+        CHECK(c.execute("SELECT l.k,r.k FROM l JOIN r ON l.k=r.k AND l.k>0").rows.empty());
+        Query joined{"l", {column("a", "k"), column("b", "k")}};
+        joined.alias = "a";
+        joined.join = Join{"r", "b"};
+        joined.join->cross = true;
+        Predicate equality{column("a", "k"), Compare::equal, column("b", "k")};
+        Predicate failure{call("fail", {}), Compare::equal, literal(std::int64_t{1})};
+        joined.join->on = equality;
+        CHECK(db.query(joined).rows.empty());
+        joined.join->cross = false;
+        joined.join->on = all_of({failure, equality});
+        expect(ErrorCode::constraint, [&] { db.query(joined); });
+        joined.join->on = all_of({equality, failure});
+        CHECK(db.query(joined).rows.empty()); // FALSE short-circuits the callback.
+        c.execute("INSERT INTO r VALUES(NULL)");
+        expect(ErrorCode::constraint, [&] { db.query(joined); }); // UNKNOWN does not.
+        c.execute("DELETE FROM r WHERE k IS NULL");
+        c.execute("DELETE FROM l");
+        c.execute("INSERT INTO l VALUES(NULL)");
+        expect(ErrorCode::constraint, [&] { db.query(joined); });
+        joined.limit = 0;
+        CHECK(db.query(joined).rows.empty());
     });
 }
