@@ -94,6 +94,33 @@ int main() { return tests([] {
     registry.add(Function{"bad.inf", [](std::span<const Type>) { return real(); },
         [](std::span<const Value>) -> Value { return std::numeric_limits<double>::infinity(); }});
     expect(ErrorCode::type, [&] { evaluate_constant(call("bad.inf", {}), registry); });
+    {
+        Registry restricted(false);
+        auto integers = Registry{}.addon(integer());
+        integers.native_ops = false;
+        integers.validate_value = [](ByteView, const Value& v) {
+            if (v == Value(std::int64_t{1}))
+                throw Error(ErrorCode::type, "Integer 1 is rejected");
+        };
+        restricted.add(std::move(integers));
+        restricted.add(Registry{}.addon(text()));
+        restricted.add(Function{"always.true",
+                                [](std::span<const Type> t) {
+                                    if (t.size() != 2)
+                                        throw Error(ErrorCode::type, "Expected two operands");
+                                    return integer();
+                                },
+                                [](std::span<const Value>) -> Value { return std::int64_t{1}; }});
+        expect(ErrorCode::type, [&] {
+            evaluate_constant(
+                call("always.true", {literal(std::int64_t{0}), literal(std::int64_t{0})}), restricted);
+        });
+        auto matched =
+            choose(literal(std::int64_t{0}), "always.true",
+                   {{literal(std::int64_t{0}), literal(std::string("matched"))}},
+                   literal(std::string("fallback")));
+        expect(ErrorCode::type, [&] { evaluate_constant(matched, restricted); });
+    }
 
     TempDirectory temp;
     auto path = temp.path / "state.csql";

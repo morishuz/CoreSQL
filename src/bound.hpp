@@ -118,8 +118,7 @@ struct BoundExpr {
                         continue;
                     std::array<Value, 2> values{base, std::move(condition)};
                     condition = function->invoke(values);
-                    if (!std::holds_alternative<std::int64_t>(condition))
-                        registry.validate(condition, integer());
+                    registry.validate(condition, integer());
                 }
                 if (!is_null(condition) && std::get<std::int64_t>(condition))
                     return arguments[i].evaluate(row, registry);
