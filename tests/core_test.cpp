@@ -1,6 +1,7 @@
 #include "check.hpp"
 #include "coresql/encoding.hpp"
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 
@@ -87,6 +88,12 @@ int main() { return tests([] {
     expect(ErrorCode::unsupported, [&] { extended.query(Query{"bytes", {}, {}, {Order{column("v")}}}); });
     expect(ErrorCode::unsupported, [&] { extended.query(Query{"bytes", {}, Predicate{column("v"), Compare::equal, column("v")}}); });
     expect(ErrorCode::type, [&] { extended.query(Query{"bytes", {call("bad.result", {})}}); });
+    registry.add(Function{"bad.real", [](std::span<const Type>) { return real(); },
+        [](std::span<const Value>) -> Value { return std::numeric_limits<double>::quiet_NaN(); }});
+    expect(ErrorCode::type, [&] { evaluate_constant(call("bad.real", {}), registry); });
+    registry.add(Function{"bad.inf", [](std::span<const Type>) { return real(); },
+        [](std::span<const Value>) -> Value { return std::numeric_limits<double>::infinity(); }});
+    expect(ErrorCode::type, [&] { evaluate_constant(call("bad.inf", {}), registry); });
 
     TempDirectory temp;
     auto path = temp.path / "state.csql";
@@ -190,10 +197,25 @@ int main() { return tests([] {
         grouped.group_by = {column("day")};
         grouped.repeatable = true;
         CHECK(i64_payload(calendar.query(grouped).rows[0][1]) == 1);
+        tagged.add(Function{"wide.days", [days](std::span<const Type>) { return days; },
+            [days](std::span<const Value>) -> Value { return compact(days, std::array<std::byte, 16>{}); }});
+        expect(ErrorCode::type, [&] { evaluate_constant(call("wide.days", {}), tagged); });
+        auto marker = compact(days, std::int64_t{0x0123456789ABCDEF});
+        auto mark = calendar.begin();
+        mark.create_table("markers", {{"day", days, true}});
+        mark.insert("markers", {marker});
+        mark.commit();
         auto compact_path = temp.path / "compact.csql";
         calendar.save(compact_path);
         auto compact_restored = Database::load(compact_path, tagged);
         CHECK(type_of(compact_restored.query(Query{"events"}).rows[0][0]) == days);
         CHECK(i64_payload(compact_restored.query(Query{"events"}).rows[0][0]) == 1);
+        CHECK(i64_payload(compact_restored.query(Query{"markers"}).rows[0][0]) == 0x0123456789ABCDEF);
+        std::ifstream compact_file(compact_path, std::ios::binary);
+        std::string compact_bytes((std::istreambuf_iterator<char>(compact_file)), {});
+        const char le[] = {'\xEF', '\xCD', '\xAB', '\x89', '\x67', '\x45', '\x23', '\x01'};
+        const char be[] = {'\x01', '\x23', '\x45', '\x67', '\x89', '\xAB', '\xCD', '\xEF'};
+        CHECK(compact_bytes.find(std::string(le, 8)) != std::string::npos);
+        CHECK(compact_bytes.find(std::string(be, 8)) == std::string::npos);
     }
 }); }

@@ -1,4 +1,5 @@
 #include "key_index.hpp"
+#include "comparison.hpp"
 #include <array>
 #include <bit>
 #include <unordered_map>
@@ -7,7 +8,9 @@ namespace coresql::detail {
 std::vector<Value> KeyBinding::keys(const Value& value) const {
     auto result = extractor.extract(value);
     for (const auto& key : result) {
-        if (type_of(key) != extractor.key_type)
+        if (is_null(key))
+            throw Error(ErrorCode::type, "Extractor returned a NULL key");
+        if (!holds_layout(addon, extractor.key_type, key))
             throw Error(ErrorCode::type, "Extractor returned the wrong key type");
         addon.validate_value(extractor.key_type.parameters, key);
     }

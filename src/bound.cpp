@@ -116,7 +116,7 @@ auto substitute_parameters(const Expr& expression, std::size_t offset = 0) {
 BoundExpr bind(const Expr& expression, const Scope& table, const Registry& registry, unsigned depth) {
     if (depth > 64)
         fail(ErrorCode::schema, "Expression nesting exceeds 64");
-    BoundExpr result{integer(), expression.kind, 0, std::int64_t{0}, nullptr, false, {}};
+    BoundExpr result{integer(), expression.kind, 0, std::int64_t{0}, nullptr, {}};
     switch (expression.kind) {
     case Expr::Kind::column: {
         auto [index, type] = table.resolve(expression);
@@ -363,7 +363,6 @@ BoundExpr bind(const Expr& expression, const Scope& table, const Registry& regis
         }
         result.type = result.function->infer(types);
         registry.validate(result.type);
-        result.trust_native = registry.addon(result.type).native_ops;
         if (result.function->prepare) {
             result.prepared = result.function->prepare(types, result.type);
             if (!result.prepared)

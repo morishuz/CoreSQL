@@ -67,5 +67,50 @@ int main() {
         Database truth_db(truth);
         sql::Connection truth_sql(truth_db, truth);
         expect(ErrorCode::constraint, [&] { truth_sql.execute("SELECT 'a' IN ('a','b')"); });
+
+        Type measure{"test.measure", 1, {std::byte{7}}};
+        TypeAddon unit;
+        unit.id = measure.id;
+        unit.layout = Layout::i64;
+        unit.native_ops = true;
+        auto require_unit = [](ByteView p) {
+            if (p.size() != 1 || p[0] != std::byte{7})
+                throw Error(ErrorCode::type, "missing parameters");
+        };
+        unit.validate_type = require_unit;
+        unit.validate_value = [require_unit](ByteView p, const Value& v) {
+            require_unit(p);
+            (void)i64_payload(v);
+        };
+        unit.equal = [require_unit](ByteView p, const Value& a, const Value& b) {
+            require_unit(p);
+            return i64_payload(a) == i64_payload(b);
+        };
+        unit.compare = [require_unit](ByteView p, const Value& a, const Value& b) {
+            require_unit(p);
+            auto x = i64_payload(a), y = i64_payload(b);
+            return (x > y) - (x < y);
+        };
+        unit.hash = [require_unit](ByteView p, const Value& v) {
+            require_unit(p);
+            return std::hash<std::int64_t>{}(i64_payload(v));
+        };
+        Registry measures;
+        measures.add(std::move(unit));
+        sql::install(measures);
+        auto in = [&](std::int64_t needle, std::vector<std::int64_t> candidates) {
+            std::vector<Expr> values;
+            values.reserve(candidates.size());
+            for (auto n : candidates)
+                values.push_back(literal(compact(measure, n)));
+            Query q{"", {membership(literal(compact(measure, needle)), std::move(values), "sql.equal")}};
+            auto rows = Database(measures).query(q).rows;
+            CHECK(rows.size() == 1 && rows[0].size() == 1);
+            return rows[0][0];
+        };
+        CHECK(in(1, {1, 2}) == Value(std::int64_t{1}));
+        CHECK(in(3, {1, 2}) == Value(std::int64_t{0}));
+        CHECK(in(9, {1, 2, 3, 4, 5, 6, 7, 8, 9}) == Value(std::int64_t{1}));
+        CHECK(in(0, {1, 2, 3, 4, 5, 6, 7, 8, 9}) == Value(std::int64_t{0}));
     });
 }

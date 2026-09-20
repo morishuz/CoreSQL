@@ -62,6 +62,15 @@ void reject_default_identity(const Type& type) {
     if (type.id == integer().id || type.id == real().id || type.id == text().id)
         fail(ErrorCode::type, "Default identity is untagged");
 }
+void validate_value(const TypeAddon& addon, const Type& type, const Value& value) {
+    if (is_null(value)) { if (type_of(value) != type) fail(ErrorCode::type, "NULL type mismatch"); return; }
+    if (!detail::holds_layout(addon, type, value))
+        fail(ErrorCode::type, "Value does not match column/function type: " + type.id);
+    addon.validate_value(type.parameters, value);
+}
+
+}
+namespace detail {
 bool holds_layout(const TypeAddon& addon, const Type& type, const Value& value) {
     switch (addon.layout) {
     case Layout::i64:
@@ -85,14 +94,7 @@ bool holds_layout(const TypeAddon& addon, const Type& type, const Value& value) 
     }
     return false;
 }
-void validate_value(const TypeAddon& addon, const Type& type, const Value& value) {
-    if (is_null(value)) { if (type_of(value) != type) fail(ErrorCode::type, "NULL type mismatch"); return; }
-    if (!holds_layout(addon, type, value))
-        fail(ErrorCode::type, "Value does not match column/function type: " + type.id);
-    addon.validate_value(type.parameters, value);
-}
-
-}
+} // namespace detail
 Opaque::Opaque(Type type, Bytes bytes) : data_(std::make_shared<const Data>(Data{std::move(type), std::move(bytes)})) {}
 Compact::Compact(const Type& type, std::int64_t payload) {
     reject_default_identity(type);

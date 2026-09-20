@@ -148,9 +148,14 @@ void write_value(Bytes& data, const Value& value) {
         encoding::u64(data, std::bit_cast<std::uint64_t>(*d));
     else if (const auto* s = std::get_if<std::string>(&value))
         field(data, view(*s));
-    else if (const auto* cell = std::get_if<Compact>(&value))
-        field(data, cell->bytes());
-    else
+    else if (const auto* cell = std::get_if<Compact>(&value)) {
+        if (cell->bytes().size() == 8) {
+            Bytes payload;
+            encoding::u64(payload, std::bit_cast<std::uint64_t>(i64_payload(value)));
+            field(data, payload);
+        } else
+            field(data, cell->bytes());
+    } else
         field(data, std::get<Opaque>(value).bytes());
 }
 Value read_value(Reader& reader, const Type& type, const Registry& registry, bool tagged) {
@@ -168,9 +173,10 @@ Value read_value(Reader& reader, const Type& type, const Registry& registry, boo
         auto bytes = field(reader);
         if (bytes.size() != 8)
             throw Error(ErrorCode::format, "Invalid compact i64 payload");
-        std::int64_t payload = 0;
-        std::memcpy(&payload, bytes.data(), 8);
-        return compact(type, payload);
+        encoding::Reader payload(bytes);
+        auto value = std::bit_cast<std::int64_t>(payload.u64());
+        payload.end();
+        return compact(type, value);
     }
     if (layout == Layout::f64)
         return std::bit_cast<double>(reader.u64());

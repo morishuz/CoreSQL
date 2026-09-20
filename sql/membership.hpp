@@ -14,8 +14,11 @@ inline auto membership_factory(Registry registry, std::optional<Type> affinity =
         if (!addon.native_ops || !registry.addon(integer()).native_ops || !addon.hash || !addon.equal ||
             !addon.compare)
             return {};
-        auto hash = [f = addon.hash](const Value& v) { return f({}, v); };
-        auto equal = [f = addon.equal](const Value& a, const Value& b) { return f({}, a, b); };
+        auto parameters = type.parameters;
+        auto hash = [f = addon.hash, parameters](const Value& v) { return f(parameters, v); };
+        auto equal = [f = addon.equal, parameters](const Value& a, const Value& b) {
+            return f(parameters, a, b);
+        };
         if (candidates.size() <= 8) {
             return
                 [keys = std::vector<Value>(candidates.begin(), candidates.end()), equal](const Value& value) {

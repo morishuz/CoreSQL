@@ -2,6 +2,8 @@
 #include "coresql/core.hpp"
 
 namespace coresql::detail {
+bool holds_layout(const TypeAddon&, const Type&, const Value&);
+
 // Lexicographic ordering of equal-width rows with matching column types.
 // Uses the public validating comparison contract, including NULL ordering.
 // The registry must outlive containers using this comparator.

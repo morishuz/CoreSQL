@@ -128,6 +128,18 @@ void reuse_and_failure() {
     b.create_table("i", {{"s", text(), false, "broken.v1"}});
     expect(ErrorCode::type, [&] { b.insert("i", {std::string("x")}); });
     CHECK(b.query({"i"}).rows.empty());
+    r.add(KeyExtractor{"nullkey.v1", text(), integer(),
+                       [](const Value&) { return std::vector<Value>{Null(integer())}; }});
+    r.add(KeyExtractor{"opaquekey.v1", text(), integer(),
+                       [](const Value&) { return std::vector<Value>{Opaque(integer(), Bytes(8))}; }});
+    Database keys(r); auto k = keys.begin();
+    k.create_table("t", {{"s", text()}}); k.insert("t", {std::string("x")});
+    expect(ErrorCode::type, [&] { k.query({"t", {}, contains(column("s"), "nullkey.v1", literal(std::int64_t{1}))}); });
+    expect(ErrorCode::type, [&] { k.query({"t", {}, contains(column("s"), "opaquekey.v1", literal(std::int64_t{1}))}); });
+    k.create_table("n", {{"s", text(), false, "nullkey.v1"}});
+    k.create_table("o", {{"s", text(), false, "opaquekey.v1"}});
+    expect(ErrorCode::type, [&] { k.insert("n", {std::string("x")}); });
+    expect(ErrorCode::type, [&] { k.insert("o", {std::string("x")}); });
 }
 void atomic_key_edits() {
     Registry r;
