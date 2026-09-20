@@ -3,6 +3,9 @@
 
 namespace coresql::detail {
 bool holds_layout(const TypeAddon&, const Type&, const Value&);
+// Layout and provider value checks only. Type lookup and validate_type stay at bind
+// or on the public Registry::validate path.
+void check_value(const TypeAddon&, const Type&, const Value&);
 
 // Lexicographic ordering of equal-width rows with matching column types.
 // Uses the public validating comparison contract, including NULL ordering.

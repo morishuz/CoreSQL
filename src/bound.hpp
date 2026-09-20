@@ -63,6 +63,8 @@ struct BoundExpr {
     std::size_t index = 0;
     Value value = std::int64_t{0};
     const Function* function = nullptr;
+    const TypeAddon* result_addon = nullptr;
+    const TypeAddon* truth_addon = nullptr;
     std::vector<BoundExpr> arguments;
     std::function<Value(std::span<const Value>)> subquery = {};
     std::function<Value(std::span<const Value>)> prepared = {};
@@ -118,7 +120,7 @@ struct BoundExpr {
                         continue;
                     std::array<Value, 2> values{base, std::move(condition)};
                     condition = function->invoke(values);
-                    registry.validate(condition, integer());
+                    detail::check_value(*truth_addon, integer(), condition);
                 }
                 if (!is_null(condition) && std::get<std::int64_t>(condition))
                     return arguments[i].evaluate(row, registry);
@@ -143,7 +145,7 @@ struct BoundExpr {
         if (!function->accepts_null && std::any_of(values.begin(), values.end(), is_null))
             return Null(type);
         auto result = prepared ? prepared(values) : function->invoke(values);
-        registry.validate(result, type);
+        detail::check_value(*result_addon, type, result);
         return result;
     }
 };

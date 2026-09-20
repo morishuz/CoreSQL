@@ -116,7 +116,7 @@ auto substitute_parameters(const Expr& expression, std::size_t offset = 0) {
 BoundExpr bind(const Expr& expression, const Scope& table, const Registry& registry, unsigned depth) {
     if (depth > 64)
         fail(ErrorCode::schema, "Expression nesting exceeds 64");
-    BoundExpr result{integer(), expression.kind, 0, std::int64_t{0}, nullptr, {}};
+    BoundExpr result{integer(), expression.kind, 0, std::int64_t{0}, nullptr, nullptr, nullptr, {}};
     switch (expression.kind) {
     case Expr::Kind::column: {
         auto [index, type] = table.resolve(expression);
@@ -177,8 +177,9 @@ BoundExpr bind(const Expr& expression, const Scope& table, const Registry& regis
             result.arguments.resize(1);
         }
         const auto needle_type = result.arguments[0].type;
+        const auto* truth = &registry.addon(integer());
         result.type = integer();
-        result.subquery = [tables, &registry, equal, substitute, same_type, needle_type,
+        result.subquery = [tables, &registry, equal, substitute, same_type, needle_type, truth,
                            literals = std::move(literals), lookup = MembershipLookup{},
                            query = bool(expression.subquery),
                            cacheable = expression.subquery && expression.subquery->repeatable &&
@@ -191,7 +192,7 @@ BoundExpr bind(const Expr& expression, const Scope& table, const Registry& regis
                     return false;
                 }
                 auto answer = equal->invoke(std::array<Value, 2>{values[0], candidate});
-                registry.validate(answer, integer());
+                detail::check_value(*truth, integer(), answer);
                 if (is_null(answer)) {
                     unknown = true;
                     return false;
@@ -311,8 +312,10 @@ BoundExpr bind(const Expr& expression, const Scope& table, const Registry& regis
             fail(ErrorCode::schema, "Conditional needs a branch");
         const bool fallback = (expression.arguments.size() - first) % 2 != 0;
         const std::size_t end = expression.arguments.size() - (fallback ? 1 : 0);
-        if (first)
+        if (first) {
             result.function = &registry.function(expression.name);
+            result.truth_addon = &registry.addon(integer());
+        }
         for (const auto& a : expression.arguments)
             result.arguments.push_back(bind(a, table, registry, depth + 1));
         auto null_literal = [](const BoundExpr& e) {
@@ -363,6 +366,7 @@ BoundExpr bind(const Expr& expression, const Scope& table, const Registry& regis
         }
         result.type = result.function->infer(types);
         registry.validate(result.type);
+        result.result_addon = &registry.addon(result.type);
         if (result.function->prepare) {
             result.prepared = result.function->prepare(types, result.type);
             if (!result.prepared)

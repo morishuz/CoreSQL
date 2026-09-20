@@ -62,12 +62,6 @@ void reject_default_identity(const Type& type) {
     if (type.id == integer().id || type.id == real().id || type.id == text().id)
         fail(ErrorCode::type, "Default identity is untagged");
 }
-void validate_value(const TypeAddon& addon, const Type& type, const Value& value) {
-    if (is_null(value)) { if (type_of(value) != type) fail(ErrorCode::type, "NULL type mismatch"); return; }
-    if (!detail::holds_layout(addon, type, value))
-        fail(ErrorCode::type, "Value does not match column/function type: " + type.id);
-    addon.validate_value(type.parameters, value);
-}
 
 }
 namespace detail {
@@ -93,6 +87,16 @@ bool holds_layout(const TypeAddon& addon, const Type& type, const Value& value) 
         return false;
     }
     return false;
+}
+void check_value(const TypeAddon& addon, const Type& type, const Value& value) {
+    if (is_null(value)) {
+        if (type_of(value) != type)
+            throw Error(ErrorCode::type, "NULL type mismatch");
+        return;
+    }
+    if (!holds_layout(addon, type, value))
+        throw Error(ErrorCode::type, "Value does not match column/function type: " + type.id);
+    addon.validate_value(type.parameters, value);
 }
 } // namespace detail
 Opaque::Opaque(Type type, Bytes bytes) : data_(std::make_shared<const Data>(Data{std::move(type), std::move(bytes)})) {}
@@ -212,14 +216,14 @@ void Registry::validate(const Type& type) const { addon(type).validate_type(type
 void Registry::validate(const Value& value, const Type& expected) const {
     const auto& extension = addon(expected);
     extension.validate_type(expected.parameters);
-    validate_value(extension, expected, value);
+    detail::check_value(extension, expected, value);
 }
 bool Registry::orderable(const Type& type) const { validate(type); return bool(addon(type).compare); }
 bool Registry::equatable(const Type& type) const { validate(type); return bool(addon(type).equal); }
 int Registry::compare(const Value& a, const Value& b) const {
     const auto type = type_of(a); const auto& extension = addon(type);
     extension.validate_type(type.parameters);
-    validate_value(extension, type, a); validate_value(extension, type, b);
+    detail::check_value(extension, type, a); detail::check_value(extension, type, b);
     if (!extension.compare) fail(ErrorCode::unsupported, "Type does not support ordering: " + type.id);
     if (is_null(a) || is_null(b)) return int(is_null(b)) - int(is_null(a));
     return extension.compare(type.parameters, a, b);
@@ -227,7 +231,7 @@ int Registry::compare(const Value& a, const Value& b) const {
 bool Registry::equal(const Value& a, const Value& b) const {
     const auto type = type_of(a); const auto& extension = addon(type);
     extension.validate_type(type.parameters);
-    validate_value(extension, type, a); validate_value(extension, type, b);
+    detail::check_value(extension, type, a); detail::check_value(extension, type, b);
     if (!extension.equal) fail(ErrorCode::unsupported, "Type does not support equality: " + type.id);
     if (is_null(a) || is_null(b)) return is_null(a) && is_null(b);
     return extension.equal(type.parameters, a, b);

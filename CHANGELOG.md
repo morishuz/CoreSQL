@@ -16,8 +16,9 @@ compatibility and permanent storage-format compatibility are not guaranteed.
   little-endian days/microseconds.
 - DECIMAL stores a compact `i128` coefficient; on-disk bytes match the previous
   Opaque encoding.
-- Bound function evaluation validates every returned value. `native_ops`
-  remains a comparison and hash certificate, not a validity shortcut.
+- Bound function evaluation validates every returned value. Type lookup and
+  `validate_type` run at bind; per-row checks are layout and `validate_value`.
+  `native_ops` remains a comparison and hash certificate, not a validity shortcut.
 - The bundled hash index stores native i64 keys in hash tables instead of
   ordered maps, including DATE and TIMESTAMP primary keys.
 - Compact cells intern types without allocating on hits, encode DECIMAL inline,
