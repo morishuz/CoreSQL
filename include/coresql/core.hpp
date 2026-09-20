@@ -82,6 +82,8 @@ private:
 using Value = std::variant<std::int64_t, double, std::string, Opaque, Null, Compact>;
 Value compact(const Type&, std::int64_t);
 Value compact(const Type&, std::array<std::byte, 16>);
+// Interns a type identity for compact cells. Returned references are process-lifetime.
+const Type& intern(const Type&);
 inline bool is_null(const Value& v) {
     return std::holds_alternative<Null>(v);
 }

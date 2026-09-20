@@ -173,17 +173,18 @@ Type arithmetic_type(std::span<const Type> t, std::string_view op) {
 // Type-dependent arithmetic setup is shared by direct invocation and binding.
 // Binding owns the result type and scale factors for this expression only.
 struct Arithmetic {
-    Type result;
+    const Type* result = nullptr;
     std::string op;
     bool floating;
     unsigned sa = 0, sb = 0, scale = 0;
     Wide fa = 1, fb = 1, base = 1, limit = 1;
     Arithmetic(std::span<const Type> types, Type type, std::string operation)
-        : result(std::move(type)), op(std::move(operation)), floating(result == real()) {
+        : op(std::move(operation)), floating(type == real()) {
         if (!floating) {
+            result = &intern(type);
             sa = numeric(types[0]).scale;
             sb = numeric(types[1]).scale;
-            const auto format = format_of(result);
+            const auto format = format_of(*result);
             scale = format.scale;
             fa = power(sa);
             fb = power(sb);
@@ -223,16 +224,16 @@ struct Arithmetic {
             if (__builtin_add_overflow(integral * base, fraction, &n))
                 overflow();
         }
-        return value(n, result);
+        return value(n, *result);
     }
 };
 struct Sum final : AggregateState {
-    Type result;
+    const Type* result;
     bool average;
     Wide limit;
     Wide total = 0;
     std::int64_t count = 0;
-    Sum(Type t, bool avg) : result(std::move(t)), average(avg), limit(power(format_of(result).precision)) {}
+    Sum(Type t, bool avg) : result(&intern(std::move(t))), average(avg), limit(power(format_of(*result).precision)) {}
     void step(std::span<const Value> args) override {
         if (is_null(args[0]))
             return;
@@ -244,8 +245,8 @@ struct Sum final : AggregateState {
     }
     Value finish() override {
         if (!count)
-            return Null(average ? real() : result);
-        auto v = value(total, result);
+            return Null(average ? real() : *result);
+        auto v = value(total, *result);
         return average ? Value(to_real(v) / static_cast<double>(count)) : v;
     }
 };

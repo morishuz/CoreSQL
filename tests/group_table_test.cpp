@@ -48,5 +48,21 @@ int main() {
         check(other);
         detail::GroupTable<int> empty(r, std::vector<Type>{integer()}, true);
         empty.finish([](const Row&, int) { CHECK(false); });
+        std::vector<Type> pair{text(), integer()};
+        detail::GroupTable<int> hashed(r, pair, true), ordered(r, pair, false);
+        for (int round = 0; round < 2; ++round)
+            for (auto label : {std::string("a"), std::string("b"), std::string("a")})
+                for (const auto& n : {Value(std::int64_t{1}), Value(std::int64_t{2}), Value(Null(integer()))}) {
+                    Row key{label, n};
+                    ++hashed.get(key, [] { return 0; });
+                    ++ordered.get(key, [] { return 0; });
+                }
+        std::vector<Row> hashed_rows, ordered_rows;
+        hashed.finish(
+            [&](const Row& key, int count) { hashed_rows.push_back({key[0], key[1], std::int64_t(count)}); });
+        ordered.finish([&](const Row& key, int count) {
+            ordered_rows.push_back({key[0], key[1], std::int64_t(count)});
+        });
+        CHECK(hashed_rows == ordered_rows && hashed_rows.size() == 6);
     });
 }

@@ -205,6 +205,8 @@ int main() { return tests([] {
         expect(ErrorCode::type, [&] { compact(integer(), std::int64_t{1}); });
         auto cell = compact(days, std::int64_t{7});
         CHECK(type_of(cell) == days && i64_payload(cell) == 7);
+        CHECK(&std::get<Compact>(cell).type() == &intern(days));
+        CHECK(&intern(days) == &intern(Type{days.id, days.version, days.parameters}));
         Database calendar(tagged);
         auto seed = calendar.begin();
         seed.create_table("events", {{"day", days, true}, {"n", integer()}});

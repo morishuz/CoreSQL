@@ -23,6 +23,10 @@ compatibility and permanent storage-format compatibility are not guaranteed.
   ordered maps, including DATE and TIMESTAMP primary keys.
 - Compact cells intern types without allocating on hits, encode DECIMAL inline,
   and pack payload width into the type pointer so `Value` stays 32 bytes.
+  Interning keeps an 8-entry thread-local cache; DECIMAL arithmetic retains
+  interned result types. Repeatable grouping hashes native_ops keys, not only a
+  single i64 column. Inner joins whose ON starts with cross-alias equality use
+  the borrowed-row join path.
 - Typed relational API with joins, grouping, aggregates, ordering, indexes and
   correlated subqueries; statement-atomic mutations and snapshot transactions.
 - Durable logs, checkpoints, backup/restore, integrity checks, named savepoints

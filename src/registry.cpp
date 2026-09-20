@@ -1,6 +1,7 @@
 #include "comparison.hpp"
 #include "key_index.hpp"
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -41,10 +42,14 @@ struct InternLess {
     }
 };
 const Type& intern_type(const Type& type) {
-    thread_local const Type* cached = nullptr;
-    if (cached && cached->id == type.id && cached->version == type.version &&
-        cached->parameters == type.parameters)
-        return *cached;
+    thread_local std::array<const Type*, 8> cache{};
+    thread_local std::size_t next = 0;
+    for (auto* slot : cache) {
+        if (slot == &type)
+            return type;
+        if (slot && slot->id == type.id && slot->version == type.version && slot->parameters == type.parameters)
+            return *slot;
+    }
     static std::mutex lock;
     static std::map<InternKey, Type, InternLess> table;
     InternView view{type.id, type.version, type.parameters};
@@ -55,7 +60,7 @@ const Type& intern_type(const Type& type) {
         Type stored{key.id, key.version, key.parameters};
         found = table.emplace(std::move(key), std::move(stored)).first;
     }
-    cached = &found->second;
+    cache[next++ % cache.size()] = &found->second;
     return found->second;
 }
 void reject_default_identity(const Type& type) {
@@ -111,6 +116,7 @@ Compact::Compact(const Type& type, std::array<std::byte, 16> payload) : payload_
 }
 Value compact(const Type& type, std::int64_t payload) { return Compact(type, payload); }
 Value compact(const Type& type, std::array<std::byte, 16> payload) { return Compact(type, payload); }
+const Type& intern(const Type& type) { return intern_type(type); }
 std::int64_t i64_payload(const Value& value) {
     if (auto* i = std::get_if<std::int64_t>(&value))
         return *i;

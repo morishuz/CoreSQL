@@ -11,7 +11,7 @@ const Type& type() {
     static const Type identity{id, 1, {}};
     return identity;
 }
-Value value(std::int64_t unix_microseconds) { return compact(type(), unix_microseconds); }
+Value value(std::int64_t unix_microseconds) { return compact(intern(type()), unix_microseconds); }
 std::int64_t microseconds(const Value& value) {
     auto* cell = std::get_if<Compact>(&value);
     if (!cell || cell->bytes().size() != 8 || cell->type().id != id || cell->type().version != 1)

@@ -5,6 +5,44 @@
 #include <set>
 
 namespace coresql::detail::execution {
+bool lower_inner_on_join(Query& query) {
+    if (!query.join || query.join->kind != JoinKind::inner || !query.join->on)
+        return false;
+    std::vector<const Predicate*> parts;
+    auto collect = [&](auto& self, const Predicate& predicate) -> void {
+        if (predicate.kind == Predicate::Kind::all)
+            for (const auto& child : predicate.children)
+                self(self, child);
+        else
+            parts.push_back(&predicate);
+    };
+    collect(collect, *query.join->on);
+    std::optional<std::size_t> equality;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        const auto& part = *parts[i];
+        if (part.kind == Predicate::Kind::comparison && part.operation == Compare::equal &&
+            part.left.kind == Expr::Kind::column && part.right.kind == Expr::Kind::column &&
+            part.left.qualifier != part.right.qualifier) {
+            equality = i;
+            break;
+        }
+    }
+    if (!equality)
+        return false;
+    query.join->left = parts[*equality]->left;
+    query.join->right = parts[*equality]->right;
+    std::vector<Predicate> rest;
+    for (std::size_t i = 0; i < parts.size(); ++i)
+        if (i != *equality)
+            rest.push_back(*parts[i]);
+    query.join->on.reset();
+    if (!rest.empty()) {
+        auto extra = rest.size() == 1 ? std::move(rest.front()) : all_of(std::move(rest));
+        query.where = query.where ? all_of({std::move(extra), std::move(*query.where)}) : extra;
+    }
+    return true;
+}
+
 // Right-side filtering completes before ON/WHERE, even with an empty left side.
 // Repeatable queries retain immutable chunks and row locations instead of values.
 Result run_filtered_join(const Tables& tables, const Query& query, const Registry& registry) {

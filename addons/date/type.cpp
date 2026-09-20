@@ -19,7 +19,7 @@ const Type& type() {
 }
 Value value(std::int64_t unix_days) {
     check(unix_days);
-    return compact(type(), unix_days);
+    return compact(intern(type()), unix_days);
 }
 std::int64_t days(const Value& input) {
     auto* cell = std::get_if<Compact>(&input);
