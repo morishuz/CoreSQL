@@ -445,7 +445,8 @@ std::optional<BoundPredicate> bind_predicate(const std::optional<Predicate>& pre
 
 // A proof applies only to the predicate that selected these snapshot-local rows.
 // Never move a later condition ahead of earlier potentially throwing functions.
-std::optional<IndexResult> candidates(const detail::Table& table, std::optional<BoundPredicate>& predicate) {
+std::optional<IndexResult> candidates(const detail::Table& table, std::optional<BoundPredicate>& predicate,
+                                      const Registry& registry) {
     auto* guard = predicate ? predicate->leading_key_guard() : nullptr;
     std::optional<IndexResult> result;
     if (guard && guard->membership) {
@@ -472,6 +473,8 @@ std::optional<IndexResult> candidates(const detail::Table& table, std::optional<
                     result->rows.push_back(*location);
         }
     }
+    if (!result)
+        result = composite_candidates(table, predicate, registry);
     if (!result && guard && guard->leaf) {
         const auto& leaf = *guard->leaf;
         if (leaf.left.kind == Expr::Kind::column && leaf.right.kind == Expr::Kind::literal &&

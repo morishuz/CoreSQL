@@ -11,7 +11,7 @@ Result insert(Transaction& tx, const Statement& s, const Registry& registry,
     Result result;
     // RETURNING allocations and all rows form one atomic SQL statement.
     std::optional<Transaction::Savepoint> scope;
-    if (s.query || s.rows.size() > 1 || !s.returning.empty())
+    if (s.query || s.rows.size() > 1 || !s.returning.empty() || s.conflict != Statement::no_conflict)
         scope.emplace(tx.savepoint());
     auto it = schema.find(s.table);
     if (it == schema.end())
@@ -21,27 +21,7 @@ Result insert(Transaction& tx, const Statement& s, const Registry& registry,
     for (std::size_t i = 0; i < columns.size(); ++i)
         if (columns[i].primary_key && columns[i].type == integer())
             generated = i;
-    std::vector<std::size_t> returning;
-    for (std::size_t i = 0; i < s.returning.size(); ++i) {
-        const auto& n = s.returning[i];
-        if (n.kind == Node::star && n.qualifier.empty()) {
-            if (!s.returning_aliases[i].empty())
-                throw Error(ErrorCode::schema, "RETURNING * cannot have an alias");
-            for (std::size_t c = 0; c < columns.size(); ++c) {
-                returning.push_back(c);
-                result.columns.push_back(columns[c].name);
-            }
-        } else {
-            if (n.kind != Node::column || (!n.qualifier.empty() && n.qualifier != s.table))
-                throw Error(ErrorCode::unsupported, "RETURNING supports target columns and * only");
-            auto c = std::find_if(columns.begin(), columns.end(),
-                                  [&](const Column& col) { return col.name == n.name; });
-            if (c == columns.end())
-                throw Error(ErrorCode::schema, "Unknown RETURNING column: " + n.name);
-            returning.push_back(static_cast<std::size_t>(c - columns.begin()));
-            result.columns.push_back(s.returning_aliases[i].empty() ? n.name : s.returning_aliases[i]);
-        }
-    }
+    const auto returning = returning_columns(s, columns, result);
     // Compute a starting maximum lazily, once per ordinary multi-row statement.
     // REPLACE can remove the largest key through another UNIQUE constraint.
     std::optional<std::int64_t> largest;
@@ -82,6 +62,18 @@ Result insert(Transaction& tx, const Statement& s, const Registry& registry,
             if (!values[i])
                 throw Error(ErrorCode::constraint, "Missing non-NULL column: " + columns[i].name);
             row.push_back(convert(std::move(*values[i]), columns[i].type, false, adapters));
+        }
+        if (s.conflict != Statement::no_conflict) {
+            largest.reset();
+            if (!upsert(tx, s, registry, parameters, adapters, row))
+                return;
+            Row returned;
+            for (auto c : returning)
+                returned.push_back(row[c]);
+            if (!s.returning.empty())
+                result.rows.push_back(std::move(returned));
+            ++result.changes;
+            return;
         }
         Row returned;
         for (auto c : returning)

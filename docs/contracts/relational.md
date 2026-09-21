@@ -233,7 +233,8 @@ including for duplicates and NULLs; preserved unmatched sides receive typed NULL
 values. Filtering the result cannot turn a matched row into an unmatched row.
 
 `on`, output expressions and filters all bind before execution, including on
-empty input and LIMIT 0. The general path materializes joined rows; indexed
+empty input and LIMIT 0. General joins normally materialize joined rows; eligible
+inner scans instead retain borrowed matched pairs as described below. Indexed
 column-equality inner joins retain the existing path. SQL-specific coercion stays
 outside this API. The shared row comparator serves DISTINCT, sets, grouping and
 DISTINCT aggregate state, so extension ordering uses one contract throughout.
@@ -331,7 +332,7 @@ seeing the original full table. Broad candidate sets use the original scan.
 
 Eligible repeatable two-source chains can also bypass the left-input copy and use
 the original snapshot rows directly. This requires an explicit projection, no
-source/right filters or general ON, and a Cartesian/native-integer inner join.
+source/right filters or general ON, and a Cartesian/native-key inner join.
 The full query shape is still validated before execution; row order and LIMIT
 behavior are unchanged.
 
@@ -346,8 +347,9 @@ shape validation. Eligible repeatable chains also project only columns needed by
 joins, WHERE, grouping, ordering, output and correlated captures into intermediate
 tables. These changes preserve source order; this is not arbitrary join reordering.
 
-General and outer ON joins can use a lazy integer-key candidate lookup when the
-first ON conjunct is equality between native integer columns on opposite sides.
+General and outer ON joins can use a lazy key candidate lookup when the first ON
+conjunct is equality between matching native-certified i64, i128, REAL or TEXT
+columns on opposite sides.
 The complete ON still determines matches. NULL right keys remain candidates and
 a NULL left key scans all right rows, preserving UNKNOWN and subsequent errors.
 Candidate order, duplicates and unmatched-row emission remain unchanged. A
@@ -376,3 +378,36 @@ Repeatable scan projections may lazily share identical scalar call results withi
 one projected row. Conditional branches retain first-demand evaluation, failures
 are not cached, and predicates/sorts/separate executions do not share these slots.
 Group lookup borrows incoming keys until a new group needs an owned key.
+
+General inner ON joins without grouping, aggregates, DISTINCT or explicit index
+search retain matched pairs as borrowed row references for the final scan. All
+ON evaluation completes before WHERE, ordering and projection begin, including
+when LIMIT is small. The complete ON predicate and NULL candidates are preserved.
+References stay within the retained query snapshot; returned rows own their
+values. Other general/outer joins continue to materialize their intermediate rows.
+
+### Native-key join lookup
+
+Equality joins can build query-local hash lookups for matching native-certified
+i64, i128, REAL and TEXT keys. Duplicate matches retain right-input order and
+borrow keys from the immutable query snapshot. General ON joins only use a
+leading equality; NULL candidates retain UNKNOWN evaluation and callback order.
+Providers without the native-semantics certificate retain the nested fallback.
+
+## Composite range selection and mutation results
+
+Ordered-index selection can combine a leading equality prefix with an inclusive
+range on the next index column, honoring mixed ascending/descending directions.
+The selector considers only the initial conjunction of total, certified-native
+column/literal comparisons on nonnullable columns. It stops at callbacks, nullable
+columns and other conditions to preserve error/UNKNOWN evaluation. The full
+predicate is rechecked and row visitation order is retained. A leading primary-key
+lookup keeps precedence. This is deterministic prefix selection, not a statistics-
+based cost optimizer. It avoids scanning unrelated rows; wider ranges can still
+return large candidate buffers.
+
+`Transaction::update_returning` and `erase_returning` return all affected columns
+with their types, containing new and deleted values respectively. They retain the
+normal atomic mutation guarantees and evaluate assignments/predicates once. The
+ordinary count-only APIs avoid allocating these result rows. SQL applies its own
+RETURNING projection outside the core.

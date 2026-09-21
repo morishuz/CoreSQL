@@ -1,0 +1,42 @@
+[
+  {
+    "id": "speedtest1/star/130-inner",
+    "fixture": "star",
+    "sql": "SELECT count(*), max(content04), min(content03), sum(rate04), avg(rate05) FROM facttab, dimension01, dimension02, dimension03, dimension04, dimension05, dimension06, dimension07, dimension08 WHERE attr01=beta01 AND attr02=beta02 AND attr03=beta03 AND attr04=beta04 AND attr05=beta05 AND attr06=beta06 AND attr07=beta07 AND attr08=beta08",
+    "source": "sqlite/speedtest1",
+    "adaptation": "Query unchanged; deterministic signed pseudo-random data and batched INSERT replace recursive generator; fact rows=max(50, rows/20), original dimension sizes and indexes. Every fact ID ending in 0 or 9 gets matching dimension keys to prevent empty reduced joins; other rows retain signed random keys.",
+    "ordered": false
+  },
+  {
+    "id": "speedtest1/star/130-mixed",
+    "fixture": "star",
+    "sql": "SELECT count(*), max(content04), min(content03), sum(rate04), avg(rate05) FROM facttab LEFT JOIN dimension01 ON attr01=beta01 LEFT JOIN dimension02 ON attr02=beta02 JOIN dimension03 ON attr03=beta03 JOIN dimension04 ON attr04=beta04 JOIN dimension05 ON attr05=beta05 LEFT JOIN dimension06 ON attr06=beta06 JOIN dimension07 ON attr07=beta07 JOIN dimension08 ON attr08=beta08 WHERE facttab.data01 LIKE 'data-9%'",
+    "source": "sqlite/speedtest1",
+    "adaptation": "Same setup adaptation as star inner; original mixed LEFT/INNER query retained. Every fact ID ending in 0 or 9 gets matching dimension keys to prevent empty reduced joins; other rows retain signed random keys.",
+    "ordered": false
+  },
+  {
+    "id": "speedtest1/fp/110",
+    "fixture": "fp",
+    "sql": "SELECT sum(b) FROM z1 WHERE a BETWEEN -25.0 AND 25.0",
+    "source": "sqlite/speedtest1",
+    "adaptation": "Reduced deterministic dyadic REAL values replace random ASCII floating literals; range case uses fixed bounds and one execution per sample; index setup untimed. Not the full upstream fp suite.",
+    "ordered": false
+  },
+  {
+    "id": "speedtest1/fp/130",
+    "fixture": "fp_index",
+    "sql": "SELECT sum(b) FROM z1 WHERE a BETWEEN -25.0 AND 25.0",
+    "source": "sqlite/speedtest1",
+    "adaptation": "Reduced deterministic dyadic REAL values replace random ASCII floating literals; range case uses fixed bounds and one execution per sample; index setup untimed. Not the full upstream fp suite.",
+    "ordered": false
+  },
+  {
+    "id": "speedtest1/fp/140",
+    "fixture": "fp",
+    "sql": "SELECT sum(round(a,2)+round(b,4)) FROM z1",
+    "source": "sqlite/speedtest1",
+    "adaptation": "Reduced deterministic dyadic REAL values replace random ASCII floating literals; range case uses fixed bounds and one execution per sample; index setup untimed. Not the full upstream fp suite.",
+    "ordered": false
+  }
+]

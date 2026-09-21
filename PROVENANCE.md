@@ -33,3 +33,27 @@ retains the available license choices.
 Reference manifests retain exact revisions and checksums. Generated reference
 builds and datasets are not installed with CoreSQL. The benchmark drivers,
 synthetic relation fixtures and DECIMAL implementation are original CoreSQL code.
+
+## Curated public SQL workload adaptations
+
+`benchmarks/suite/` retains public query shapes from checksum-pinned SQLite
+speedtest1, DuckDB microbenchmarks and h2oai/db-benchmark. The
+[source manifest](benchmarks/suite/sources.json) identifies exact revisions,
+paths and SHA-256 digests. Source files are fetched separately and verified.
+Each catalog records changes to SQL or setup; deterministic reduced fixtures are
+original CoreSQL benchmark code and are not upstream or published benchmark data.
+
+- `duckdb.json` adapts DuckDB queries under its preserved
+  [MIT notice](benchmarks/suite/licenses/DuckDB-MIT.txt).
+- `h2o.json` adapts H2O query definitions under
+  [MPL-2.0](benchmarks/suite/licenses/H2O-MPL-2.0.txt); the catalog remains covered
+  by that license. SELECTs replace result-table creation and separately labeled
+  variants expand qualified stars and USING joins. The original operators and
+  original syntax probes are retained. See the
+  [source-form notice](benchmarks/suite/licenses/README.md).
+- `speedtest1.json` adapts additional star/FP query shapes, retaining SQLite's
+  original attribution and the existing reference pin. This does not claim full
+  coverage of those upstream testsets.
+
+CoreSQL's license does not replace these upstream licenses, and no affiliation
+with the benchmark authors or official benchmark certification is implied.

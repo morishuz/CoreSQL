@@ -1,6 +1,7 @@
 #include "storage.hpp"
 #include "index.hpp"
 #include "comparison.hpp"
+#include "bound.hpp"
 #include <set>
 
 namespace coresql {
@@ -74,6 +75,7 @@ void Transaction::vacuum() {
 }
 void Transaction::integrity_check() const {
     auto owner = active();
+    detail::validate_constraints(staged_->tables, owner->registry);
     for (const auto& [name, table] : staged_->tables) {
         (void)name;
         std::set<std::int64_t> ids;
@@ -188,13 +190,18 @@ std::vector<IndexDefinition> Transaction::indexes(const std::string& name) const
 void Transaction::drop_table(const std::string& name) {
     active();
     detail::require_table(staged_->tables, name);
+    for (const auto& [other, table] : staged_->tables)
+        if (other != name)
+            for (const auto& key : table->constraints.foreign_keys)
+                if (key.referenced_table == name)
+                    throw Error(ErrorCode::constraint, "Cannot drop a referenced table");
     auto epoch = std::make_shared<const int>(0);
     staged_->tables.erase(name);
     staged_->schema_epoch = std::move(epoch);
     dirty_ = true;
 }
 void Transaction::drop_index(const std::string& name, const std::string& index) {
-    active();
+    auto owner = active();
     auto& stored = detail::require_table(staged_->tables, name);
     auto replacement = std::make_shared<detail::Table>(*stored);
     auto it = std::find_if(replacement->index_definitions.begin(), replacement->index_definitions.end(),
@@ -206,17 +213,33 @@ void Transaction::drop_index(const std::string& name, const std::string& index) 
     auto position = it - replacement->index_definitions.begin();
     replacement->index_definitions.erase(it);
     replacement->ordered.erase(replacement->ordered.begin() + position);
+    detail::validate_replacement_constraints(staged_->tables, name, replacement, owner->registry);
     stored = std::move(replacement);
     dirty_ = true;
 }
 void Transaction::rename_table(const std::string& name, const std::string& replacement) {
-    active();
+    auto owner = active();
     auto table = detail::require_table(staged_->tables, name);
     if (replacement.empty() || staged_->tables.contains(replacement))
         throw Error(ErrorCode::schema, "Empty or existing destination table");
     auto epoch = std::make_shared<const int>(0);
-    staged_->tables.emplace(replacement, std::move(table));
-    staged_->tables.erase(name);
+    auto candidate = staged_->tables;
+    candidate.emplace(replacement, std::move(table));
+    candidate.erase(name);
+    for (auto& [other, stored] : candidate) {
+        (void)other;
+        bool affected =
+            std::any_of(stored->constraints.foreign_keys.begin(), stored->constraints.foreign_keys.end(),
+                        [&](const ForeignKey& key) { return key.referenced_table == name; });
+        if (affected) {
+            stored = std::make_shared<detail::Table>(*stored);
+            for (auto& key : stored->constraints.foreign_keys)
+                if (key.referenced_table == name)
+                    key.referenced_table = replacement;
+        }
+    }
+    detail::validate_constraints(candidate, owner->registry);
+    staged_->tables = std::move(candidate);
     staged_->schema_epoch = std::move(epoch);
     dirty_ = true;
 }
@@ -237,12 +260,40 @@ void Transaction::rename_column(const std::string& name, const std::string& colu
         for (auto& c : d.columns)
             if (c == column)
                 c = replacement;
+    for (auto& check : table->constraints.checks)
+        detail::execution::transform_expr(check.expression, [&](Expr& e) {
+            if (e.kind == Expr::Kind::column && e.name == column)
+                e.name = replacement;
+        });
+    for (auto& key : table->constraints.foreign_keys)
+        for (auto& c : key.columns)
+            if (c == column)
+                c = replacement;
     // Rebuild derived indexes against the renamed schema without mutating old snapshots.
     detail::State candidate;
-    candidate.tables.emplace(name, table);
-    detail::rebuild_indexes(candidate, owner->registry);
+    candidate.tables = staged_->tables;
+    candidate.tables[name] = table;
+    for (auto& [other, child] : candidate.tables) {
+        (void)other;
+        bool affected =
+            std::any_of(child->constraints.foreign_keys.begin(), child->constraints.foreign_keys.end(),
+                        [&](const ForeignKey& key) { return key.referenced_table == name; });
+        if (affected) {
+            child = std::make_shared<detail::Table>(*child);
+            for (auto& key : child->constraints.foreign_keys)
+                if (key.referenced_table == name)
+                    for (auto& c : key.referenced_columns)
+                        if (c == column)
+                            c = replacement;
+        }
+    }
+    detail::State rebuilt;
+    rebuilt.tables.emplace(name, candidate.tables.at(name));
+    detail::rebuild_indexes(rebuilt, owner->registry);
+    candidate.tables[name] = rebuilt.tables.at(name);
     auto epoch = std::make_shared<const int>(0);
-    stored = candidate.tables.at(name);
+    detail::validate_constraints(candidate.tables, owner->registry);
+    staged_->tables = std::move(candidate.tables);
     staged_->schema_epoch = std::move(epoch);
     dirty_ = true;
 }

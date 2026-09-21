@@ -84,6 +84,7 @@ Query Lowerer::query(const Select& input, std::vector<Column>* output) const {
     Schema expanded = schema;
     Lowerer context{expanded, registry, parameters, sources, outer, captures, qualified, parameter_types};
     context.types = types;
+    context.parameterize = parameterize;
     context.ctes = ctes;
     context.relation_id = relation_id;
     Select s = input;
@@ -142,6 +143,52 @@ Query Lowerer::query(const Select& input, std::vector<Column>* output) const {
             }
         }
         source.columns.clear();
+    }
+    const auto visible = resolve_using(s, expanded, context.merged_columns);
+    // Expand stars before ordinal/alias binding and output metadata inference.
+    // Explicit qualification remains attached even when the join order changes.
+    if (std::any_of(s.projection.begin(), s.projection.end(),
+                    [](const Node& n) { return n.kind == Node::star; })) {
+        std::vector<Node> projection;
+        std::vector<std::string> aliases;
+        for (std::size_t i = 0; i < s.projection.size(); ++i) {
+            const auto& node = s.projection[i];
+            if (node.kind != Node::star) {
+                projection.push_back(node);
+                aliases.push_back(s.aliases[i]);
+                continue;
+            }
+            if (!s.aliases[i].empty())
+                throw Error(ErrorCode::schema, "Star cannot have an output alias");
+            if (node.qualifier.empty() && !visible.empty()) {
+                for (const auto& [name, value] : visible) {
+                    projection.push_back(value);
+                    aliases.push_back(name);
+                }
+                continue;
+            }
+            bool found = false;
+            for (const auto& source : s.sources) {
+                if (!node.qualifier.empty() && node.qualifier != source.alias)
+                    continue;
+                auto table = expanded.find(source.table);
+                if (table == expanded.end())
+                    throw Error(ErrorCode::schema, "Unknown star source");
+                found = true;
+                for (const auto& c : table->second) {
+                    Node column;
+                    column.kind = Node::column;
+                    column.name = c.name;
+                    column.qualifier = source.alias;
+                    projection.push_back(std::move(column));
+                    aliases.emplace_back();
+                }
+            }
+            if (!found)
+                throw Error(ErrorCode::schema, "Star requires a matching source table");
+        }
+        s.projection = std::move(projection);
+        s.aliases = std::move(aliases);
     }
     auto q = context.query_body(s);
     if (output) {

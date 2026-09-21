@@ -36,6 +36,8 @@ struct Source {
     bool explicit_join = false;
     std::shared_ptr<Select> query = {};
     std::vector<std::string> columns = {};
+    std::vector<std::string> using_columns = {};
+    std::optional<std::map<std::string, Node>> merged_columns = {};
 };
 struct CommonTable {
     std::string name;
@@ -58,6 +60,13 @@ struct Field {
     Type type;
     bool unique = false, primary = false, nullable = true;
     std::optional<Node> value;
+    std::vector<Node> checks;
+    std::optional<ForeignKey> reference;
+};
+struct KeyConstraint {
+    std::string name;
+    std::vector<std::string> columns;
+    bool primary = false;
 };
 struct Statement {
     enum Kind {
@@ -90,13 +99,20 @@ struct Statement {
     std::vector<std::pair<std::string, Node>> assignments;
     std::shared_ptr<Select> query;
     std::optional<Node> where;
+    enum Conflict { no_conflict, do_nothing, do_update } conflict = no_conflict;
+    std::vector<std::string> conflict_columns;
     bool replace = false, if_exists = false, if_not_exists = false, default_values = false;
     std::string replacement, old_column;
     std::vector<Node> returning;
     std::vector<std::string> returning_aliases;
     std::size_t parameters = 0;
+    std::map<std::string, std::size_t> named_parameters;
+    std::vector<KeyConstraint> keys;
+    std::vector<std::pair<std::string, Node>> checks;
+    std::vector<ForeignKey> foreign_keys;
 };
 Statement parse(std::string_view, const TypeAdapters&);
+std::vector<std::pair<std::string, Node>> resolve_using(Select&, const Schema&, std::map<std::string, Node>&);
 std::string function_name(const std::string&);
 struct Lowerer {
     const Schema& schema;
@@ -110,6 +126,9 @@ struct Lowerer {
     std::map<std::string, std::string> ctes = {};
     std::shared_ptr<std::size_t> relation_id = std::make_shared<std::size_t>(0);
     const TypeAdapters* types = &default_type_adapters();
+    // SQL-local template slots are substituted before crossing the core API.
+    bool parameterize = false;
+    std::map<std::string, Node> merged_columns = {};
     Expr expression(const Node&) const;
     std::optional<SqlOperation> operation(std::string_view, std::span<const Expr>,
                                           std::span<const Node> syntax = {}) const;
@@ -126,6 +145,9 @@ struct Lowerer {
     bool repeatable(const Select&) const;
     Value constant(const Node&) const;
 };
+std::vector<std::size_t> returning_columns(const Statement&, const std::vector<Column>&, Result&);
+bool upsert(Transaction&, const Statement&, const Registry&, std::span<const Value>, const TypeAdapters&,
+            Row&);
 Result insert(Transaction&, const Statement&, const Registry&, std::span<const Value>, const TypeAdapters&);
 Result execute(Transaction&, const Statement&, const Registry&, std::span<const Value>, const TypeAdapters&);
 } // namespace coresql::sql::detail

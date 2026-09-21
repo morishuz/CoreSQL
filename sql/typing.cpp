@@ -10,6 +10,12 @@ std::optional<Type> Lowerer::expression_type(const Expr& e) const {
     case Expr::Kind::membership:
         return integer();
     case Expr::Kind::parameter: {
+        if (e.name.starts_with("\x01sql.parameter.")) {
+            const auto slot = std::stoull(e.name.substr(15));
+            if (slot >= parameters.size())
+                throw Error(ErrorCode::type, "Missing template parameter");
+            return type_of(parameters[slot]);
+        }
         if (auto it = parameter_types.find(e.name); it != parameter_types.end())
             return it->second;
         // Correlated captures retain the outer expression's type while lowering.

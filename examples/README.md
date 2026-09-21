@@ -132,3 +132,14 @@ explicit aliases, and prints each matched document title and collection name.
 A document referencing a missing collection is omitted by the inner join; this
 is not foreign-key enforcement. This example does not change the persisted
 schema of the existing `coresql_documents` application.
+
+## Landmark memory
+
+`coresql_landmark_memory NEW_DIRECTORY` demonstrates background storage and exact
+vector retrieval of synthetic robot landmarks, with snapshot, durable-reopen and
+backup verification. See the [pilot contract](../docs/applications/landmark-memory.md).
+
+The landmark pilot also supplies a bounded background worker in
+[`landmark_memory/worker.hpp`](landmark_memory/worker.hpp), with explicit admission,
+model/frame filtering, durable acknowledgement and pruning. See its
+[application contract](../docs/applications/landmark-memory.md).

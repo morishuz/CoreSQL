@@ -5,7 +5,7 @@
 namespace coresql::sql::detail {
 namespace {
 struct Token {
-    enum Kind { word, identifier, string, number, symbol, end } kind;
+    enum Kind { word, identifier, string, number, symbol, parameter, end } kind;
     std::string text;
     std::size_t at;
 };
@@ -67,6 +67,11 @@ std::vector<Token> lex(std::string_view s) {
                     if (v >= 'A' && v <= 'Z')
                         v = char(v + ('a' - 'A'));
             out.push_back({c == '\'' ? Token::string : Token::identifier, std::move(text), start});
+        } else if ((c == ':' || c == '@' || c == '$') && i + 1 < s.size() && alpha(s[i + 1])) {
+            i += 2;
+            while (i < s.size() && (alpha(s[i]) || digit(s[i])))
+                ++i;
+            out.push_back({Token::parameter, std::string(s.substr(start, i - start)), start});
         } else if (alpha(c)) {
             while (i < s.size() && (alpha(s[i]) || digit(s[i])))
                 ++i;
@@ -108,6 +113,7 @@ struct Parser {
     std::vector<Token> tokens;
     const TypeAdapters& types;
     std::size_t cursor = 0, count = 0, depth = 0, query_depth = 0;
+    std::map<std::string, std::size_t> named_parameters = {};
     const Token& peek() const { return tokens[cursor]; }
     bool is(std::string_view s) const {
         return (peek().kind == Token::word || peek().kind == Token::symbol) && peek().text == s;
@@ -263,6 +269,14 @@ struct Parser {
                 need(")");
                 n = node(Node::function, "sql.cast_" + type, {std::move(value)});
             }
+        } else if (is("x") && tokens[cursor + 1].kind == Token::string) {
+            ++cursor;
+            const auto* adapter = types.named("blob");
+            if (!adapter || !adapter->typed_literal)
+                error(peek().at, "BLOB adapter is not installed");
+            n.value = adapter->typed_literal(tokens[cursor++].text);
+            if (type_of(n.value).id != adapter->type_id || type_of(n.value).version != adapter->version)
+                throw Error(ErrorCode::type, "SQL adapter returned wrong BLOB literal type");
         } else if (peek().kind == Token::word && tokens[cursor + 1].kind == Token::string &&
                    types.named(peek().text)) {
             const auto& adapter = *types.named(tokens[cursor++].text);
@@ -311,6 +325,13 @@ struct Parser {
             count = std::max(count, index);
             n = node(Node::parameter);
             n.position = index - 1;
+        } else if (token.kind == Token::parameter) {
+            ++cursor;
+            auto [entry, added] = named_parameters.emplace(token.text, count + 1);
+            if (added && ++count > 4096)
+                error(token.at, "parameter index must be 1..4096");
+            n = node(Node::parameter);
+            n.position = entry->second - 1;
         } else if (token.kind == Token::number) {
             ++cursor;
             n.numeric_spelling = token.text;
@@ -349,7 +370,11 @@ struct Parser {
                 n = node(Node::column, word);
                 if (take(".")) {
                     n.qualifier = word;
-                    n.name = name();
+                    if (take("*")) {
+                        n.kind = Node::star;
+                        n.name.clear();
+                    } else
+                        n.name = name();
                 }
             }
         }
@@ -439,6 +464,14 @@ struct Parser {
                     if (!explicit_join)
                         error(peek().at, "ON requires JOIN");
                     source.on = expr();
+                } else if (take("using")) {
+                    if (!explicit_join)
+                        error(peek().at, "USING requires JOIN");
+                    need("(");
+                    do {
+                        source.using_columns.push_back(name());
+                    } while (take(","));
+                    need(")");
                 }
                 q.sources.push_back(std::move(source));
                 kind = JoinKind::inner;
@@ -530,6 +563,23 @@ struct Parser {
         --query_depth;
         return q;
     }
+    ForeignKey references(std::vector<std::string> columns, std::string constraint = {}) {
+        ForeignKey key{std::move(constraint), std::move(columns), name(), {}};
+        need("(");
+        do {
+            key.referenced_columns.push_back(name());
+        } while (take(","));
+        need(")");
+        bool update = false, erase = false;
+        while (take("on")) {
+            bool* action = take("update") ? &update : take("delete") ? &erase : nullptr;
+            if (!action || *action)
+                error(peek().at, "Expected one ON UPDATE/DELETE RESTRICT action");
+            *action = true;
+            need("restrict");
+        }
+        return key;
+    }
     Field field() {
         Field f;
         f.name = name();
@@ -548,6 +598,14 @@ struct Parser {
             else if (take("not")) {
                 need("null");
                 f.nullable = false;
+            } else if (take("check")) {
+                need("(");
+                f.checks.push_back(expr());
+                need(")");
+            } else if (take("references")) {
+                if (f.reference)
+                    error(peek().at, "Duplicate REFERENCES declaration");
+                f.reference = references({f.name});
             } else if (take("default"))
                 f.value = expr();
             else
@@ -614,7 +672,39 @@ struct Parser {
                 s.table = name();
                 need("(");
                 do {
-                    s.fields.push_back(field());
+                    std::string constraint;
+                    if (take("constraint"))
+                        constraint = name();
+                    if (is("primary") || is("unique")) {
+                        KeyConstraint key;
+                        key.name = std::move(constraint);
+                        key.primary = take("primary");
+                        need(key.primary ? "key" : "unique");
+                        need("(");
+                        do {
+                            key.columns.push_back(name());
+                        } while (take(","));
+                        need(")");
+                        s.keys.push_back(std::move(key));
+                    } else if (take("check")) {
+                        need("(");
+                        s.checks.emplace_back(std::move(constraint), expr());
+                        need(")");
+                    } else if (take("foreign")) {
+                        need("key");
+                        need("(");
+                        std::vector<std::string> columns;
+                        do {
+                            columns.push_back(name());
+                        } while (take(","));
+                        need(")");
+                        need("references");
+                        s.foreign_keys.push_back(references(std::move(columns), std::move(constraint)));
+                    } else {
+                        if (!constraint.empty())
+                            error(peek().at, "Expected PRIMARY KEY, UNIQUE, CHECK or FOREIGN KEY constraint");
+                        s.fields.push_back(field());
+                    }
                 } while (take(","));
                 need(")");
                 if (take("without")) {
@@ -717,7 +807,36 @@ struct Parser {
                 s.where = expr();
         } else
             error(peek().at, "unsupported statement");
-        if (s.kind == Statement::insert && take("returning")) {
+        if (s.kind == Statement::insert && take("on")) {
+            need("conflict");
+            if (s.replace || s.query)
+                error(peek().at, "UPSERT supports INSERT VALUES/DEFAULT VALUES only");
+            if (take("(")) {
+                do {
+                    s.conflict_columns.push_back(name());
+                } while (take(","));
+                need(")");
+            }
+            need("do");
+            if (take("nothing"))
+                s.conflict = Statement::do_nothing;
+            else {
+                need("update");
+                need("set");
+                if (s.conflict_columns.empty())
+                    error(peek().at, "DO UPDATE requires a conflict target");
+                s.conflict = Statement::do_update;
+                do {
+                    auto column = name();
+                    need("=");
+                    s.assignments.emplace_back(std::move(column), expr());
+                } while (take(","));
+                if (take("where"))
+                    s.where = expr();
+            }
+        }
+        if ((s.kind == Statement::insert || s.kind == Statement::update || s.kind == Statement::erase) &&
+            take("returning")) {
             do {
                 s.returning.push_back(expr());
                 s.returning_aliases.push_back(take("as") ? name() : std::string{});
@@ -727,6 +846,7 @@ struct Parser {
         if (peek().kind != Token::end)
             error(peek().at, "unsupported syntax or multiple statements: " + peek().text);
         s.parameters = count;
+        s.named_parameters = named_parameters;
         return s;
     }
 };
@@ -758,6 +878,12 @@ std::size_t Statement::parameter_count() const {
     if (!parsed_)
         throw Error(ErrorCode::state, "SQL statement was moved from");
     return parsed_->parameters;
+}
+std::optional<std::size_t> Statement::parameter_index(std::string_view name) const {
+    if (!parsed_)
+        throw Error(ErrorCode::state, "SQL statement was moved from");
+    auto found = parsed_->named_parameters.find(std::string(name));
+    return found == parsed_->named_parameters.end() ? std::nullopt : std::optional{found->second};
 }
 std::vector<Statement> prepare_script(std::string_view text, const TypeAdapters& types) {
     return detail::script(text, types);

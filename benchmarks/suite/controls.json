@@ -1,0 +1,26 @@
+[
+  {
+    "id": "coresql/general-on",
+    "fixture": "wide_join",
+    "sql": "SELECT a.payload,b.v FROM l a JOIN r b ON a.k=b.k AND b.v>=0",
+    "source": null,
+    "adaptation": "Original targeted SQL control; four matches per key, 256-byte text payload; designed to distinguish general ON and equality join paths.",
+    "ordered": false
+  },
+  {
+    "id": "coresql/equality",
+    "fixture": "wide_join",
+    "sql": "SELECT a.payload,b.v FROM l a JOIN r b ON a.k=b.k",
+    "source": null,
+    "adaptation": "Original targeted SQL control; four matches per key, 256-byte text payload; designed to distinguish general ON and equality join paths.",
+    "ordered": false
+  },
+  {
+    "id": "coresql/simple-case",
+    "fixture": "nullable",
+    "sql": "SELECT SUM(CASE k WHEN 0 THEN 7 WHEN 1 THEN 11 ELSE 0 END) FROM nullable",
+    "source": null,
+    "adaptation": "Original simple CASE equality dispatch with NULL input.",
+    "ordered": false
+  }
+]

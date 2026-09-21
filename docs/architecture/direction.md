@@ -32,8 +32,11 @@ materialized. Files have one owner and calls require external serialization.
 The [storage contract](../contracts/storage.md) defines guarantees and costs;
 the [relational contract](../contracts/relational.md) defines query behavior.
 
-A pager, persisted indexes, spill, broader concurrency and strict memory budgets
-are future investigations. No storage redesign is selected. Preserve logical
+The current [landmark-memory pilot](../applications/landmark-memory.md) targets a
+bounded working set that fits in RAM: up to 100,000 128-dimensional landmarks and
+a provisional 1 GiB process budget to validate on deployment hardware. A pager,
+persisted indexes, spill, broader concurrency and strict allocator budgets remain
+future investigations; paging is outside this milestone. Preserve logical
 query interfaces and snapshot-local row identities so future storage changes do
 not leak into application semantics.
 

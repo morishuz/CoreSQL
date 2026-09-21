@@ -115,6 +115,7 @@ const TypeAdapters& default_type_adapters() {
         a.add(date_adapter());
         a.add(decimal_adapter());
         a.add(vector_adapter());
+        a.add(blob_adapter());
         return a;
     }();
     return adapters;

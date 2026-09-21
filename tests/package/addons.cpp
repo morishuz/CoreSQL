@@ -1,3 +1,4 @@
+#include <coresql/blob.hpp>
 #include <coresql/sql.hpp>
 #include <coresql/date.hpp>
 #include <coresql/decimal.hpp>
@@ -10,6 +11,8 @@ int main() {
     coresql::Registry registry;
     coresql::sql::install(registry);
     coresql::timestamps::install(registry);
+    if (coresql::blobs::hex(coresql::blobs::from_hex("00ff")) != "00FF")
+        return 1;
     coresql::spatial::install(registry);
     coresql::json::install(registry);
     coresql::graph::install(registry);

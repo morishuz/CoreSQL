@@ -89,8 +89,15 @@ void plan_from(const Select& s, const Lowerer& local, Query& q) {
             join.alias = source.alias;
             join.cross = true;
             join.kind = source.kind;
-            if (source.on)
-                join.on = local.predicate(*source.on);
+            if (source.on) {
+                if (source.merged_columns) {
+                    auto on = local;
+                    on.sources.resize(i + 1);
+                    on.merged_columns = *source.merged_columns;
+                    join.on = on.predicate(*source.on);
+                } else
+                    join.on = local.predicate(*source.on);
+            }
             if (join.kind == JoinKind::inner && join.on && join.on->kind == Predicate::Kind::comparison &&
                 join.on->operation == Compare::equal && join.on->left.kind == Expr::Kind::column &&
                 join.on->right.kind == Expr::Kind::column &&

@@ -16,6 +16,7 @@ void Transaction::insert_impl(const std::string& name, Row row, std::optional<st
         fail(ErrorCode::format, "Invalid row identity");
     auto& stored = require_table(staged_->tables, name);
     detail::prepare_row(row, stored->columns, owner->registry);
+    detail::validate_insert_constraints(staged_->tables, name, row, owner->registry);
     if (stored->primary && detail::lookup(*stored, row[stored->primary->column]))
         fail(ErrorCode::constraint, "Duplicate primary key");
     if (stored.use_count() != 1)
@@ -95,6 +96,27 @@ void Transaction::restore_row_sequence(const std::string& name, std::int64_t nex
 }
 std::size_t Transaction::update(const std::string& name, std::vector<Assignment> assignments,
                                 std::optional<Predicate> where) {
+    return update_impl(name, std::move(assignments), std::move(where), nullptr);
+}
+Result Transaction::update_returning(const std::string& name, std::vector<Assignment> assignments,
+                                     std::optional<Predicate> where) {
+    active();
+    Result result;
+    for (const auto& column : require_table(staged_->tables, name)->columns)
+        result.types.push_back(column.type);
+    update_impl(name, std::move(assignments), std::move(where), &result.rows);
+    return result;
+}
+Result Transaction::erase_returning(const std::string& name, std::optional<Predicate> where) {
+    active();
+    Result result;
+    for (const auto& column : require_table(staged_->tables, name)->columns)
+        result.types.push_back(column.type);
+    erase_impl(name, std::move(where), {}, &result.rows);
+    return result;
+}
+std::size_t Transaction::update_impl(const std::string& name, std::vector<Assignment> assignments,
+                                     std::optional<Predicate> where, std::vector<Row>* returning) {
     auto owner = active();
     auto& stored = require_table(staged_->tables, name);
     const auto& original = *stored;
@@ -112,7 +134,7 @@ std::size_t Transaction::update(const std::string& name, std::vector<Assignment>
         bound.emplace_back(target.index, std::move(value));
     }
     auto predicate = bind_predicate(where, original, owner->registry);
-    auto selected = candidates(original, predicate);
+    auto selected = candidates(original, predicate, owner->registry);
     if (selected)
         normalize(*selected);
     const auto* comparison = predicate ? predicate->direct_comparison() : nullptr;
@@ -131,6 +153,8 @@ std::size_t Transaction::update(const std::string& name, std::vector<Assignment>
                     detail::validate_stored(value, original.columns[index], owner->registry);
                     edited->rows[i][index] = std::move(value);
                 }
+                if (returning)
+                    returning->push_back(edited->rows[i]);
                 ++changed;
                 return true;
             });
@@ -157,6 +181,7 @@ std::size_t Transaction::update(const std::string& name, std::vector<Assignment>
             !original.ordered.empty())
             detail::synchronize_index(original, *replacement, owner->registry, seen);
         detail::refresh(*replacement);
+        detail::validate_replacement_constraints(staged_->tables, name, replacement, owner->registry);
         stored = std::move(replacement);
         dirty_ = true;
     }
@@ -166,11 +191,11 @@ std::size_t Transaction::erase(const std::string& name, std::optional<Predicate>
     return erase_impl(name, std::move(where), {});
 }
 std::size_t Transaction::erase_impl(const std::string& name, std::optional<Predicate> where,
-                                    std::optional<IndexResult> forced) {
+                                    std::optional<IndexResult> forced, std::vector<Row>* returning) {
     auto owner = active();
     auto& stored = require_table(staged_->tables, name);
     const auto& original = *stored;
-    if (!where && !forced) {
+    if (!where && !forced && !returning) {
         const auto count = original.row_count;
         if (!count)
             return 0;
@@ -178,10 +203,12 @@ std::size_t Transaction::erase_impl(const std::string& name, std::optional<Predi
         // Keep the ID sequence monotonic for recovery and existing snapshots.
         auto empty = std::make_shared<detail::Table>();
         empty->columns = original.columns;
+        empty->constraints = original.constraints;
         empty->index_definitions = original.index_definitions;
         empty->next_chunk = original.next_chunk;
         empty->next_rowid = original.next_rowid;
         detail::make_indexes(*empty, owner->registry);
+        detail::validate_replacement_constraints(staged_->tables, name, empty, owner->registry);
         stored = std::move(empty);
         dirty_ = true;
         return count;
@@ -190,7 +217,7 @@ std::size_t Transaction::erase_impl(const std::string& name, std::optional<Predi
     auto predicate = bind_predicate(where, original, owner->registry);
     std::shared_ptr<detail::Table> replacement;
     std::size_t changed = 0;
-    auto selected = forced ? std::move(forced) : candidates(original, predicate);
+    auto selected = forced ? std::move(forced) : candidates(original, predicate, owner->registry);
     if (selected)
         normalize(*selected);
     visit_chunks(original, selected, [&](auto id, const auto& chunk, RowSelection rows) {
@@ -201,6 +228,8 @@ std::size_t Transaction::erase_impl(const std::string& name, std::optional<Predi
             const RowLocation location{id, chunk->slot(i)};
             const bool eligible = !rows || std::binary_search(rows->begin(), rows->end(), location);
             if (eligible && (!predicate || predicate->matches(row, owner->registry))) {
+                if (returning)
+                    returning->push_back(row);
                 if (!replacement)
                     replacement = std::make_shared<detail::Table>(original);
                 if (!edited) {
@@ -247,6 +276,7 @@ std::size_t Transaction::erase_impl(const std::string& name, std::optional<Predi
     if (changed) {
         replacement->chunks.remove_empty();
         detail::refresh(*replacement);
+        detail::validate_replacement_constraints(staged_->tables, name, replacement, owner->registry);
         stored = std::move(replacement);
         dirty_ = true;
     }

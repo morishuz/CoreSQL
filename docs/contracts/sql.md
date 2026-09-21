@@ -16,7 +16,7 @@ are not part of the supported dialect until implemented and validated.
 #include "coresql/sql.hpp"
 using namespace coresql;
 Registry registry;
-// Defaults include scalar SQL policy and the DATE, DECIMAL and VECTOR add-ons.
+// Defaults include scalar SQL policy and the DATE, DECIMAL, VECTOR and BLOB add-ons.
 sql::install(registry);
 Database db(registry);
 sql::Connection connection(db, registry);
@@ -32,14 +32,31 @@ auto result = connection.execute(
 ```
 
 A statement caches an immutable parsed tree and parameter layout. It is reusable
-and copyable; it does **not** cache a bound executable plan. Execution resolves
-schema, substitutes parameters, lowers expressions and invokes the existing core
-binder. DDL changes are seen on the next execution rather than retaining stale
-schema pointers. Preparing checks syntax; schema/function/type errors can arise
+and copyable. Calling `enable_query_cache(true)` opts a connection into retaining
+one bounded, typed logical SELECT template. Parameter slots accept new values on
+every execution; schema, parameter types or NULL/non-NULL shape changes cause a
+miss. LIMIT/OFFSET are evaluated afresh. Signed zero and payload changes are never
+replaced by a previous binding. This covers repeatable, single-source queries
+without subqueries, joins, CTEs or compounds; other shapes execute normally.
+No result rows or snapshot-bound executable objects are cached. Core binding and
+index selection always use the current snapshot. Caching remains opt-in: a
+connection alternating different statements can still pay miss overhead.
+Entries are limited to 256 schema columns, 1,024 expression nodes and 64 KiB of
+counted names/value payload, plus containers and the retained parsed statement.
+Runtime parameter payloads are not retained in the template.
+`query_cache_stats()`, `clear_query_cache()` and `enable_query_cache(bool)` support
+measurement and explicit control. Preparing checks syntax; schema/function/type errors can arise
 on execution, including for empty tables. Parameters are supplied afresh to every
-execution; no previous binding is retained. `?` and `?NNN` are supported (1..4096);
-parameter count is the largest slot, and the supplied span must match it exactly.
-Named parameters and streaming `step()` are not implemented. `Result::columns`
+execution; no previous binding is retained. `?`, `?NNN`, `:name`, `@name` and
+`$name` are supported (1..4096). A name starts with an ASCII letter or underscore
+and continues with letters, digits or underscores. Names are case-sensitive and
+include their prefix: `:id` and `@id` are different parameters. Repeating the
+same name reuses its slot; a new name or anonymous `?` takes the slot after the
+largest assigned slot. `Statement::parameter_index(name)` returns that one-based
+slot, or no value for an unknown name. Parameter count is the largest slot, and
+the supplied span must match it exactly, including unused numbered slots.
+Callback streaming and controlled SELECT execution are described in the
+[execution contract](execution.md); a cursor-style `step()` is not implemented. `Result::columns`
 contains SELECT output names, including for empty results; explicit AS wins, then
 the source column name, then `column1`, `column2`, etc. for unnamed expressions.
 
@@ -62,18 +79,28 @@ do not reproduce all SQLite reuse behavior.
 
 ## Supported SQL
 
-- CREATE TABLE with INTEGER/INT/BIGINT, REAL, TEXT/VARCHAR, DATE, DECIMAL, VECTOR, or undeclared columns;
-  nullable columns, inline primary/unique keys and defaults. CREATE INDEX supports
+- CREATE TABLE with INTEGER/INT/BIGINT, REAL, TEXT/VARCHAR, BLOB, DATE, DECIMAL, VECTOR, or undeclared columns;
+  nullable columns, inline and table-level primary/unique keys and defaults.
+  Table-level keys accept multiple columns and an optional `CONSTRAINT name`.
+  CREATE INDEX supports
   multiple ordered columns. ALTER TABLE ADD COLUMN, INSERT/REPLACE VALUES or
   SELECT, UPDATE, DELETE, and explicit transactions are supported.
 - SELECT with WHERE, DISTINCT, multiple ORDER BY keys/aliases/ordinals, LIMIT,
   GROUP BY, HAVING, and expressions containing aggregates. Source-free SELECT
-  uses one empty input row.
+  uses one empty input row. `*` and `alias.*` can appear alongside other output
+  expressions; each expands in source/schema order. A star cannot have an AS
+  alias, and qualified stars are not function arguments.
 - Comma/CROSS/INNER joins and LEFT, RIGHT, FULL [OUTER] JOIN with ON predicates.
   ON determines matches before null extension; WHERE filters afterwards. Chains
   retain their written order when explicit JOIN syntax is used. Unmatched rows
-  contain typed NULLs, including extension columns. USING and NATURAL JOIN remain
-  unsupported. Ordinary equality inner joins retain their indexed execution path.
+  contain typed NULLs, including extension columns. USING accepts a nonempty list
+  of columns present on both sides: unqualified keys and `*` expose one merged
+  column, while qualified columns/stars retain the original side. LEFT/INNER use
+  the left key, RIGHT the right key, and FULL coalesces the two. Missing, duplicate
+  or ambiguous USING columns are errors. NATURAL JOIN remains unsupported.
+  In a USING chain, each ON clause resolves names at its own join stage;
+  later joins cannot redirect earlier merged-column references.
+  Ordinary equality inner joins retain their indexed execution path.
 - FROM subqueries with required aliases and optional output-column lists; ordinary
   WITH clauses with repeated references and nested lexical scope. GROUP BY accepts
   output aliases when no input column has the same name.
@@ -96,6 +123,89 @@ NOT LIKE is NOT applied to LIKE: it preserves LIKE's conversions, ASCII matching
 and NULL propagation, evaluates each operand once, and does not add ESCAPE syntax.
 Correlated outer columns in comma-joined subqueries remain typed captured inputs;
 they are not treated as local join edges.
+
+## Table-level keys
+
+`PRIMARY KEY(session, frame)` requires every key column to be non-NULL and the
+complete tuple to be unique. A table has at most one primary key declaration.
+`UNIQUE(model, label)` allows repeated keys containing NULL; non-NULL tuples must
+be unique. Duplicate or unknown columns and duplicate constraint names are errors.
+Constraints apply to native writes as well as SQL and survive savepoints,
+checkpointing and reopening. Constraint names label declarations; they do not
+introduce a DROP CONSTRAINT operation.
+
+Composite keys use protected native unique indexes and column nullability, with
+no new storage format. A single-column table-level primary key has the same
+behavior as an inline primary key, including INTEGER key generation. Composite
+keys have no generated component or composite-key `rowid` alias.
+
+## CHECK and foreign keys
+
+Inline `CHECK(expression)` and table-level `[CONSTRAINT name] CHECK(expression)`
+are persistent row checks. Zero rejects; nonzero and NULL pass. SQL truth conversion
+is applied before the core's INTEGER check. Scalar expressions, CASE and registered
+functions are supported; parameters, aggregates, subqueries and other-table
+references are rejected. CHECK also applies to native C++ writes. Core applications
+use `Transaction::set_constraints` with row-local expressions; replacing constraints
+validates all existing rows atomically. `constraints(table)` returns owned metadata.
+
+Inline `REFERENCES parent(columns)` and table-level `[CONSTRAINT name] FOREIGN KEY
+(columns) REFERENCES parent(columns)` support matching composite keys. Referenced
+columns must be explicit, have exactly matching native types and form a primary
+or UNIQUE key. The parent table must already exist; self-references are supported.
+Any NULL child-key component exempts that row (MATCH SIMPLE).
+
+Foreign keys are always enforced; there is no disable pragma. They are immediate,
+with RESTRICT behavior for parent updates/deletes. Optional `ON UPDATE RESTRICT`
+and `ON DELETE RESTRICT` spell this out. Deferred checks, CASCADE, SET NULL and
+NO ACTION syntax are not implemented. Each native mutation validates its resulting
+state; SQL multi-row INSERT processes rows in order, so a self-reference to a later
+inserted row is rejected. A failed multi-row statement rolls back its earlier rows.
+Parent-key lookup uses the required unique index; parent mutations can scan child
+tables to detect references. CHECK and outgoing-reference checks on updates inspect
+changed chunks rather than rechecking the complete child table.
+
+Renames update constraint references atomically. Dropping a referenced table or
+its required unique index is rejected. ADD COLUMN with CHECK/REFERENCES is currently
+unsupported. Constraint metadata survives snapshots, savepoints, backup and recovery.
+The registry used to reopen must supply all types and named functions used by checks,
+including `sql::install` for SQL-created check expressions.
+
+## UPSERT
+
+`INSERT ... VALUES ... ON CONFLICT(key_columns) DO UPDATE SET column=expression
+[WHERE predicate]` updates the conflicting row in place. Expressions can read its
+existing columns and the proposed `excluded.column` values. DO UPDATE requires
+an explicit primary/UNIQUE conflict target; composite target order may differ
+from the index declaration. Assignments and WHERE must be row-local.
+
+`ON CONFLICT [(key_columns)] DO NOTHING` skips a conflicting row. Without a target
+it handles any primary/UNIQUE collision. It does not suppress CHECK, NOT NULL,
+conversion or foreign-key errors. `RETURNING` reports actual inserted/updated rows;
+skipped rows produce no result and no change count. Multi-row operations remain
+statement-atomic, including a failure in a later update. UPDATE preserves identity
+and does not perform REPLACE's delete/insert behavior.
+
+The initial UPSERT syntax supports VALUES and DEFAULT VALUES, one conflict clause,
+and the existing column-only RETURNING forms. INSERT SELECT with UPSERT, partial
+conflict targets, subqueries in the update clause and REPLACE plus ON CONFLICT are
+rejected.
+
+## Binary payloads
+
+`BLOB` is an independent byte-sequence add-on (`coresql.blob`, version 1), installed
+by the default SQL configuration. Use `X'00FF'`, `BLOB '00FF'`, or bind
+`blobs::value(bytes)`. Empty bytes and embedded zero bytes are preserved. Hex
+literals require complete pairs of hexadecimal digits. Equality and ordering use
+exact unsigned bytes; UNIQUE, indexes, grouping and DISTINCT use those semantics.
+`length(blob)` counts bytes and `hex(blob)` returns uppercase hex; NULL propagates.
+
+TEXT/BLOB conversion requires explicit CAST and preserves raw bytes, including NUL;
+it does not validate UTF-8. Numeric/BLOB conversion and implicit TEXT assignment
+are rejected. Use declared BLOB columns: the heterogeneous undeclared-column
+`sql.value` representation still supports only integer, real and text values.
+Native applications link `CoreSQL::blob` and call `blobs::install(registry)`;
+do not install it again after the default `sql::install`.
 
 ## Derived relations and ordinary CTEs
 
@@ -217,7 +327,7 @@ results require an explicit cast. Undeclared columns still store only the origin
 integer/real/text scalar classes. Interval arithmetic, timestamp conversion and
 calendar extraction are not implemented yet.
 
-`sql::install` installs date, decimal and vector add-ons as well as SQL semantics;
+`sql::install` installs date, decimal, vector and blob add-ons as well as SQL semantics;
 do not also install those add-ons separately in that registry. C++ applications without SQL can link
 `CoreSQL::date` and call `dates::install`. SQL results retain native DATE values;
 use `dates::format` to display them. The SQL CLI displays ISO dates directly.
@@ -334,13 +444,13 @@ reordering joins or moving predicates across a potentially failing expression.
 
 Identifiers are normalized to lowercase. Quoted identifiers, escaped strings and
 SQL comments are supported. Parsing limits remain 1 MiB, 16,384 tokens, 64 nesting
-levels and 4,096 parameter slots. Queries materialize results; joins, grouping,
+levels and 4,096 parameter slots. Ordinary execute/query calls materialize results; joins, grouping,
 sets and DISTINCT have no spill-to-disk or whole-query memory budget. Outer joins
-track unmatched right rows; a leading native-integer ON equality can restrict
+track unmatched right rows; a leading equality on matching types with certified native comparison/hash semantics can restrict
 candidate scans, with a nested-scan fallback for other predicates.
 
-General sequences, AUTOINCREMENT, foreign keys,
-triggers, recursive CTEs, LATERAL, windows, aggregate-local ordering, BLOB casts,
+General sequences, AUTOINCREMENT, cascading/deferred foreign keys,
+triggers, recursive CTEs, LATERAL, windows, aggregate-local ordering,
 date arithmetic and collations remain outside the dialect. Grouped
 columns must be grouped or aggregated; SQLite's bare-column aggregate shortcut
 is unsupported. Interfaces and the SQL value encoding remain experimental.
@@ -435,15 +545,29 @@ format or persistent counter is introduced.
 
 `INSERT`, `INSERT OR REPLACE` and `REPLACE` accept `RETURNING` after VALUES,
 DEFAULT VALUES or SELECT. This initial version supports target column names,
-qualified target columns, optional explicit AS aliases, and `*` (including mixed
+qualified target columns, optional explicit AS aliases, and `*`/`table.*` (including mixed
 `*, id`). It does not support expressions, subqueries, implicit rowid aliases,
-UPDATE/DELETE RETURNING, or RETURNING as a relation. Output contains the converted
+or RETURNING as a relation. Output contains the converted
 inserted values, with one row per insertion in input-processing order, and uses
 `sql::Result::columns` and `changes`. Empty INSERT SELECT still validates output
 names and returns column metadata. REPLACE returns only the inserted row, not
 rows removed by conflicts. Rows are materialized; the statement rolls back if
 insertion or RETURNING construction fails. Values returned inside an explicit
 transaction are provisional until its commit succeeds.
+
+`UPDATE ... RETURNING` returns the final values of each affected row; `DELETE ...
+RETURNING` returns its values before deletion. They accept the same column/star
+forms, report change counts and column names even for zero matches, and evaluate
+the mutation predicate/assignments only once. Rows are collected from the native
+mutation, including when primary keys change. Output construction and constraint
+failures roll back the SQL statement. Result order is not a SQL ordering guarantee.
+
+`ROUND(value[, digits])` returns REAL, propagates NULL and uses the scalar numeric
+conversion rules. Precision is truncated and clamped to 0..30. It rounds the
+scaled binary floating-point value halfway away from zero. It is approximate
+arithmetic: decimal halfway cases can differ from decimal arithmetic or another
+engine's formatting-based rounding. DECIMAL arguments require an explicit cast
+to REAL; this does not change exact DECIMAL operations.
 
 ## Vector SQL adapter
 

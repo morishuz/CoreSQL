@@ -8,15 +8,14 @@ CoreSQL explores a simple idea: a database should be small enough to understand
 and structured enough to extend. It combines a typed relational core, optional
 SQL, and durable local files. It has no SQLite runtime dependency.
 
-- **Small and readable.** About 11,000 lines across the engine, SQL frontend,
-  public headers and bundled add-ons, including comments and blank lines;
-  tests and external reference code are separate.
+- **Small and readable.** Small modules separate the engine, SQL frontend,
+  public headers and bundled add-ons; tests and external reference code live separately.
 - **Clear boundaries.** Storage and transactions belong to the core. SQL parsing
   and domain-specific behavior live in separate modules.
 - **Extensible by design.** Register types, scalar functions, aggregates and index
   providers. Even built-in integer, real and text types use the type-extension API.
-  Bundled add-ons include JSON, vectors, dates, decimals, timestamps, spatial boxes
-  and an experimental graph API. Integer, real, text, DATE, DECIMAL and VECTOR use
+  Bundled add-ons include JSON, vectors, binary payloads, dates, decimals, timestamps, spatial boxes
+  and an experimental graph API. Integer, real, text, BLOB, DATE, DECIMAL and VECTOR use
   shared SQL adapters for declarations, conversions and type-specific operations.
 
 Extensions are trusted, linked C++ code, not sandboxed or dynamically loaded
@@ -55,6 +54,11 @@ The persistent example writes, closes and reopens its database. The CLI runs SQL
 scripts or reads standard input. Ordinary builds fetch no dependencies.
 For C++ integration, use `CoreSQL::core` or `CoreSQL::sql` through CMake;
 [installation and examples](docs/usage.md) cover the complete workflow.
+
+The current application pilot is a [bounded landmark memory](docs/applications/landmark-memory.md)
+with a background worker, durable acknowledgements and exact vector retrieval.
+See [execution controls](docs/contracts/execution.md) for cooperative cancellation
+and callback scan streaming.
 
 ## Performance
 

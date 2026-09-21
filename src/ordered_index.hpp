@@ -22,6 +22,7 @@ class OrderedIndex {
     static Link balance(Link);
     Link insert(Link, std::shared_ptr<const Row>, RowLocation) const;
     Link erase(Link, const Row&, RowLocation) const;
+
 public:
     IndexDefinition definition;
     std::vector<std::size_t> columns;
@@ -32,5 +33,7 @@ public:
     void erase(const Row&, RowLocation);
     std::vector<RowLocation> equal(const Row&) const;
     std::vector<RowLocation> range(const Value&, const Value&) const;
+    // Equality prefix followed by an optional inclusive range, in logical order.
+    std::vector<RowLocation> prefix_range(const Row&, const Value* lo, const Value* hi) const;
 };
-}
+} // namespace coresql::detail

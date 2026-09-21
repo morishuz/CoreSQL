@@ -1,0 +1,92 @@
+{
+  "duckdb/aggregate/simple_aggregate": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/aggregate/simple_aggregate.benchmark",
+    "sha256": "73c951264e4f12b6f674ab93fb8c63901dbfaccfa6585d85693a5fff80cb24e1"
+  },
+  "duckdb/aggregate/simple_group": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/aggregate/simple_group.benchmark",
+    "sha256": "571229c676809bb69831ab26597face1bacadd377a4571b11606b29f024565d4"
+  },
+  "duckdb/aggregate/grouped_distinct": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/aggregate/grouped_distinct.benchmark",
+    "sha256": "d8c4ac68bdccace6a214c7c1370367215a6090c1732966df9e4f2dc25aceb8a0"
+  },
+  "duckdb/case/integer_case_alternate": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/case/integer_case_alternate.benchmark",
+    "sha256": "c90d4051dbdbb813ddc87a45948587a1dfab0c8661ebb86fd3b57a2b0be39a1d"
+  },
+  "duckdb/case/integer_case_predictable": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/case/integer_case_predictable.benchmark",
+    "sha256": "ea31d979a5c6c19d41c90d3615cadc16dbaeb36bb4c1758498814b0b045a288b"
+  },
+  "duckdb/join/hashjoin_lhsarithmetic": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/join/hashjoin_lhsarithmetic.benchmark",
+    "sha256": "7e023a5abe0d97f05ab63457ad61299b0537deb314f4a263974231f0191f503b"
+  },
+  "duckdb/join/hashjoin_dups_rhs": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/join/hashjoin_dups_rhs.benchmark",
+    "sha256": "34bcb1eabb62386a2749f14d9efcdb762794897abeb4625b03cc342011b5b2d9"
+  },
+  "duckdb/order/orderby": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/order/orderby.benchmark",
+    "sha256": "99dfa75f22da6cecc69fc94489731fcf1b35797a64ecbb47ecc295aaa0591bdb"
+  },
+  "duckdb/optimizer/topn_optimization": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/optimizer/topn_optimization.benchmark",
+    "sha256": "16d79d274885ee51faceb59b965800c6e072326aa721021ce42e947fcf514bd1"
+  },
+  "duckdb/cast/cast_int_string": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "benchmark/micro/cast/cast_int_string.benchmark",
+    "sha256": "14ebcf71436022b86af7c9463e79b3e320b5b66ba8a73dfb8d8f86654e86e0a9"
+  },
+  "h2o/groupby": {
+    "repository": "h2oai/db-benchmark",
+    "revision": "c7421051af7530951d16b1505158371aebc0d2c1",
+    "path": "duckdb/groupby-duckdb.R",
+    "sha256": "932bff40cc84c388e07d39f38ea740ca85601ec67e554468a5ee553d0b887bda"
+  },
+  "h2o/join": {
+    "repository": "h2oai/db-benchmark",
+    "revision": "c7421051af7530951d16b1505158371aebc0d2c1",
+    "path": "duckdb/join-duckdb.R",
+    "sha256": "d11b6d0906d6ab91f38934337b9c2f552f91a06c0c14b21aed8b9b2dcb9c2fd2"
+  },
+  "sqlite/speedtest1": {
+    "repository": "sqlite/sqlite",
+    "revision": "f3b9f74d81132426dee1ccc07a67fdad2ccfeaa9",
+    "path": "test/speedtest1.c",
+    "sha256": "5cd19d9e626d148d825aa900c9f8acdac7343b26d4c7e7fa07291a64c50827a2"
+  },
+  "duckdb/license": {
+    "repository": "duckdb/duckdb",
+    "revision": "625f75fce87c7b49c0bef7c331bd89a32d1c0d38",
+    "path": "LICENSE",
+    "sha256": "075c33400ffcb0c586dd106a029d3e733e9da3693f8fcb9cebfc651c8a2f14e3"
+  },
+  "h2oai/license": {
+    "repository": "h2oai/db-benchmark",
+    "revision": "c7421051af7530951d16b1505158371aebc0d2c1",
+    "path": "LICENSE",
+    "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"
+  }
+}

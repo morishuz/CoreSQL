@@ -97,9 +97,24 @@ Transaction Database::begin() {
     return Transaction(owner_);
 }
 Result Database::query(const Query& query) const {
+    return this->query(query, {});
+}
+Result Database::query(const Query& query, const QueryOptions& options) const {
     detail::healthy(owner_);
+    detail::execution::QueryControl control(options);
     auto snapshot = owner_->current;
-    return detail::execution::run(snapshot->tables, query, owner_->registry);
+    auto result = detail::execution::run(snapshot->tables, query, owner_->registry);
+    control.check();
+    return result;
+}
+StreamResult Database::query_each(const Query& query, const RowVisitor& visit,
+                                  const QueryOptions& options) const {
+    detail::healthy(owner_);
+    detail::execution::QueryControl control(options);
+    auto snapshot = owner_->current;
+    auto result = detail::execution::stream(snapshot->tables, query, owner_->registry, visit);
+    control.check();
+    return result;
 }
 Stats Database::stats() const {
     detail::healthy(owner_);
@@ -111,8 +126,24 @@ Schema Database::schema() const {
 }
 
 Result Transaction::query(const Query& query) const {
+    return this->query(query, {});
+}
+Result Transaction::query(const Query& query, const QueryOptions& options) const {
     auto owner = active();
-    return detail::execution::run(staged_->tables, query, owner->registry);
+    detail::execution::QueryControl control(options);
+    auto result = detail::execution::run(staged_->tables, query, owner->registry);
+    control.check();
+    return result;
+}
+StreamResult Transaction::query_each(const Query& query, const RowVisitor& visit,
+                                     const QueryOptions& options) const {
+    auto owner = active();
+    // Retain the snapshot even if a visitor writes through this transaction.
+    const auto snapshot = staged_->tables;
+    detail::execution::QueryControl control(options);
+    auto result = detail::execution::stream(snapshot, query, owner->registry, visit);
+    control.check();
+    return result;
 }
 Schema Transaction::schema() const {
     active();

@@ -1,0 +1,98 @@
+[
+  {
+    "id": "duckdb/aggregate/simple_aggregate",
+    "fixture": "mod5",
+    "sql": "SELECT SUM(i) FROM integers",
+    "source": "duckdb/aggregate/simple_aggregate",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically.",
+    "ordered": false
+  },
+  {
+    "id": "duckdb/aggregate/simple_group",
+    "fixture": "group5",
+    "sql": "SELECT i, SUM(j) FROM integers GROUP BY i ORDER BY i",
+    "source": "duckdb/aggregate/simple_group",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically.",
+    "ordered": true
+  },
+  {
+    "id": "duckdb/aggregate/grouped_distinct",
+    "fixture": "distinct25",
+    "sql": "SELECT SUM(distinct i), COUNT(distinct i), AVG(distinct i), PRODUCT(distinct i) FROM integers group by j order by 1,2,3,4",
+    "source": "duckdb/aggregate/grouped_distinct",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically. Explicit output ordinal ordering replaces ORDER BY ALL; PRODUCT remains a capability probe.",
+    "ordered": true
+  },
+  {
+    "id": "duckdb/case/integer_case_alternate",
+    "fixture": "sequence",
+    "sql": "SELECT SUM(CASE WHEN i%2=0 THEN 1 ELSE 0 END) FROM integers",
+    "source": "duckdb/case/integer_case_alternate",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically.",
+    "ordered": false
+  },
+  {
+    "id": "duckdb/case/integer_case_predictable",
+    "fixture": "sequence",
+    "sql": "SELECT SUM(CASE WHEN i<{half} THEN 1 ELSE 0 END) FROM integers",
+    "source": "duckdb/case/integer_case_predictable",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically. Threshold scales with rows.",
+    "ordered": false
+  },
+  {
+    "id": "duckdb/join/hashjoin_lhsarithmetic",
+    "fixture": "arithmetic_join",
+    "sql": "SELECT CASE WHEN t1.v1 > 50 THEN t1.v1+t1.v2 ELSE t1.v1*t1.v2 END FROM t1 JOIN t2 USING (v1)",
+    "source": "duckdb/join/hashjoin_lhsarithmetic",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically. Small side has max(100, rows/100) rows.",
+    "ordered": false
+  },
+  {
+    "id": "duckdb/join/hashjoin_lhsarithmetic/on",
+    "fixture": "arithmetic_join",
+    "sql": "SELECT CASE WHEN t1.v1 > 50 THEN t1.v1+t1.v2 ELSE t1.v1*t1.v2 END FROM t1 JOIN t2 ON t1.v1=t2.v1",
+    "source": "duckdb/join/hashjoin_lhsarithmetic",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically. Small side has max(100, rows/100) rows. Explicit ON equality replaces USING (unsupported in CoreSQL); original USING case retained separately. Selected columns are unchanged.",
+    "ordered": false
+  },
+  {
+    "id": "duckdb/join/hashjoin_dups_rhs",
+    "fixture": "duplicate_join",
+    "sql": "select count(*) from t1 join t2 using (i)",
+    "source": "duckdb/join/hashjoin_dups_rhs",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically. Reduced key cardinality, retains four RHS/LHS-small duplicates; large side fanout reduced to 16.",
+    "ordered": false
+  },
+  {
+    "id": "duckdb/join/hashjoin_dups_rhs/on",
+    "fixture": "duplicate_join",
+    "sql": "select count(*) from t1 join t2 ON t1.i=t2.i",
+    "source": "duckdb/join/hashjoin_dups_rhs",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically. Reduced key cardinality, retains four RHS/LHS-small duplicates; large side fanout reduced to 16. Explicit ON equality replaces USING (unsupported in CoreSQL); original USING case retained separately. Selected columns are unchanged.",
+    "ordered": false
+  },
+  {
+    "id": "duckdb/order/orderby",
+    "fixture": "sort",
+    "sql": "SELECT i, j FROM integers ORDER BY i , j",
+    "source": "duckdb/order/orderby",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically. Adds j as tie breaker for exact ordered comparison.",
+    "ordered": true
+  },
+  {
+    "id": "duckdb/optimizer/topn_optimization",
+    "fixture": "topn",
+    "sql": "SELECT * FROM integers WHERE i IN (SELECT * FROM other_table) ORDER BY i LIMIT 4",
+    "source": "duckdb/optimizer/topn_optimization",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically. Five IN keys scaled into the reduced input domain.",
+    "ordered": true
+  },
+  {
+    "id": "duckdb/cast/cast_int_string",
+    "fixture": "sequence",
+    "sql": "SELECT MAX(CAST(i AS VARCHAR)) FROM integers",
+    "source": "duckdb/cast/cast_int_string",
+    "adaptation": "Reduced row count; setup generated outside SQL and loaded identically.",
+    "ordered": false
+  }
+]

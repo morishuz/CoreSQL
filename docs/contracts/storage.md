@@ -139,9 +139,9 @@ snapshots, and checkpoint/reopening.
 
 ## Extension index declarations
 
-New change records are `CORECHG6` and snapshot exports are `CORESQL5`, including
+New change records are `CORECHG7` and snapshot exports are `CORESQL6`, including
 column index implementation IDs, named ordered-index definitions, defaults and
-stable row identities. Readers retain `CORECHG2/3/4/5` and `CORESQL1/2/3/4`
+stable row identities. Readers retain `CORECHG2/3/4/5/6` and `CORESQL1/2/3/4/5`
 support. `CORELOG2` framing and the durability protocol are unchanged. Index
 structures rebuild from validated rows during open; registered types and index
 factories must be present. See [extension ownership](extensions.md).
@@ -192,3 +192,15 @@ native database with exclusive creation. `Database::restore(snapshot, new_path)`
 imports supported exports into durable storage. Existing destinations are rejected.
 After a failed/interrupted operation, the destination may be incomplete; preserve
 the source and retry to a fresh path. See [backup and upgrade guide](../usage.md).
+
+## Persistent constraints
+
+CORESQL6/CORECHG7 add named CHECK expression trees and foreign-key declarations to
+table descriptors. CHECK stores logical scalar operations, literal types/values and
+column names, never SQL text or callback addresses. Readers bound nesting and node
+counts and validate the resulting expressions. Required type and function providers
+must be registered before opening. Foreign keys name explicit columns and tables;
+indexes are rebuilt before recovery validates all constraints against the recovered
+state. Invalid constraints or rows prevent opening rather than silently disabling
+checks. Older binaries cannot read these new records; retain verified backups before
+upgrading. CORELOG2 framing and synchronized commit publication are unchanged.

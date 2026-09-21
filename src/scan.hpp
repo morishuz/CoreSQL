@@ -56,14 +56,17 @@ void visit_chunks(const detail::Table& table, const std::optional<IndexResult>& 
 template <class F> bool visit_rows(const detail::Chunk& chunk, RowSelection selected, F&& visit) {
     if (selected) {
         for (auto location : *selected) {
+            query_step();
             const auto i = chunk.position(location.slot);
             if (!visit(i, chunk.rows[i]))
                 return false;
         }
     } else {
-        for (std::size_t i = 0; i < chunk.rows.size(); ++i)
+        for (std::size_t i = 0; i < chunk.rows.size(); ++i) {
+            query_step();
             if (!visit(i, chunk.rows[i]))
                 return false;
+        }
     }
     return true;
 }

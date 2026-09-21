@@ -2,28 +2,29 @@
 #include "query_stages.hpp"
 #include "scan.hpp"
 #include "index.hpp"
-#include "integer_join.hpp"
+#include "native_join.hpp"
 #include "projection_cache.hpp"
 #include "predicate_reuse.hpp"
 
 namespace coresql::detail::execution {
 Result run_scan(const Tables& tables, const Query& query, const Registry& registry,
-                const std::optional<Predicate>& early, const RowConsumer* consumer) {
+                const std::optional<Predicate>& early, const RowConsumer* consumer,
+                const std::vector<RowView>* input_rows, const RowVisitor* visitor) {
     const auto& table = *require_table(tables, query.table);
     Scope scope(table);
     scope.left_alias = query.alias;
-    scope.allow_identity = true;
+    scope.allow_identity = !input_rows;
     std::optional<BoundExpr> join_left, join_right;
     std::optional<detail::Comparison> join_comparison;
     bool indexed_join = false;
-    IntegerJoinLookup hash_join;
+    NativeJoinLookup hash_join;
     const detail::OrderedIndex* ordered_join = nullptr;
     if (query.join) {
         if (query.alias.empty() || query.join->alias.empty() || query.alias == query.join->alias)
             fail(ErrorCode::schema, "Join requires two distinct nonempty aliases");
         scope.right = require_table(tables, query.join->table).get();
         scope.right_alias = query.join->alias;
-        if (!query.join->cross) {
+        if (!input_rows && !query.join->cross) {
             if (query.join->left.kind != Expr::Kind::column || query.join->right.kind != Expr::Kind::column)
                 fail(ErrorCode::schema, "Join operands must be columns");
             join_left = bind(query.join->left, scope, registry);
@@ -61,7 +62,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
 
     ProjectionCache projection_cache(projection, query.repeatable);
     auto predicate = bind_predicate(query.where, scope, registry);
-    if (predicate && query.repeatable && query.join && query.join->cross)
+    if (!input_rows && predicate && query.repeatable && query.join && query.join->cross)
         reuse_left_predicates(*predicate, table.columns.size());
     struct BoundOrder {
         BoundExpr expression;
@@ -100,7 +101,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
     if (query.limit == 0 || (scope.right && scope.right->row_count == 0))
         return result;
     if (!scope.right && !query.search)
-        selected = candidates(table, predicate);
+        selected = candidates(table, predicate, registry);
     if (selected)
         normalize(*selected);
     // Keep the first owned key inline: single-key sorts need no per-row allocation.
@@ -122,6 +123,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
         return o.expression.kind == Expr::Kind::column ? match.row[o.expression.index] : o.expression.value;
     };
     auto before = [&](const Match& a, const Match& b) {
+        query_step();
         for (std::size_t i = 0; i < order.size(); ++i) {
             int c = order[i].comparison.compare(key(a, i), key(b, i));
             if (c)
@@ -138,6 +140,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
     if (consumer)
         projected.reserve(projection.size());
     auto accept = [&](const auto& row) {
+        query_step();
 #ifdef CORESQL_TESTING
         if (auto* counters = detail::active_query_counters)
             ++counters->rows_tested;
@@ -152,6 +155,13 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
         if (predicate && (direct ? !direct->values(row[direct->left.index], direct->right.value)
                                  : !predicate->matches(row, registry)))
             return true;
+        if (visitor) {
+            projection_cache.reset();
+            projected.clear();
+            for (const auto& expression : projection)
+                projected.push_back(expression.evaluate(row, registry));
+            return (*visitor)(projected) && ++ordinal != query.limit;
+        }
         if (consumer) {
             // Repeatable aggregate inputs need not retain rows. Continue WHERE
             // after a projection failure: the original scan evaluated all WHERE
@@ -198,7 +208,11 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
         return !order.empty() || matches.size() != query.limit;
     };
     // Keep the common scan loop direct; row-selection and join machinery is cold.
-    if (!selected && !scope.right && !table.selection) {
+    if (input_rows) {
+        for (const auto& row : *input_rows)
+            if (!accept(row))
+                break;
+    } else if (!selected && !scope.right && !table.selection) {
         bool more = true;
         for (const auto& [id, chunk] : table.chunks) {
             (void)id;
@@ -248,9 +262,10 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
                     return accept(
                         RowView(row, indexed_row(*scope.right, *location), chunk->rowids[position]));
                 }
-                if (!query.join->cross && native_i64(registry.addon(join_left->type))) {
-                    const auto& candidates = hash_join.find(
-                        *scope.right, join_right->index - table.columns.size(), i64_payload(value));
+                if (!query.join->cross && native_join_key(registry.addon(join_left->type))) {
+                    const auto& candidates =
+                        hash_join.find(*scope.right, join_right->index - table.columns.size(), value,
+                                       registry, join_left->type);
                     for (const auto* other : candidates) {
 #ifdef CORESQL_TESTING
                         if (auto* counters = detail::active_query_counters)
@@ -274,7 +289,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
             });
         });
     }
-    if (consumer) {
+    if (consumer || visitor) {
         if (projection_error)
             std::rethrow_exception(projection_error);
         return result;

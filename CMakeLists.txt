@@ -16,8 +16,8 @@ add_library(coresql
   src/core.cpp src/expression.cpp src/bound.cpp
   src/query.cpp src/query_scan.cpp src/query_join.cpp src/query_reduce.cpp
   src/disjunctive_join.cpp src/relation.cpp src/subquery_plan.cpp src/mutation.cpp
-  src/transaction.cpp src/schema.cpp src/registry.cpp src/index.cpp
-  src/ordered_index.cpp src/key_index.cpp src/snapshot.cpp src/storage.cpp
+  src/transaction.cpp src/constraints.cpp src/schema.cpp src/registry.cpp src/index.cpp
+  src/ordered_index.cpp src/index_selection.cpp src/key_index.cpp src/snapshot.cpp src/storage.cpp
   addons/scalars/type.cpp addons/aggregates/aggregates.cpp addons/relational/functions.cpp addons/hash_index/index.cpp)
 target_include_directories(coresql PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -40,6 +40,7 @@ function(coresql_addon name source)
   target_link_libraries(coresql_${name} PUBLIC coresql)
   target_compile_options(coresql_${name} PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endfunction()
+coresql_addon(blob addons/blob/type.cpp)
 coresql_addon(vector addons/vector/type.cpp)
 coresql_addon(timestamp addons/timestamp/type.cpp)
 coresql_addon(spatial addons/spatial/type.cpp)
@@ -48,15 +49,15 @@ coresql_addon(graph addons/graph/graph.cpp)
 coresql_addon(date addons/date/type.cpp)
 coresql_addon(decimal addons/decimal/type.cpp)
 add_library(coresql_sql
-  sql/parser.cpp sql/lower.cpp sql/select.cpp sql/execute.cpp sql/insert.cpp
+  sql/parser.cpp sql/lower.cpp sql/select.cpp sql/execute.cpp sql/insert.cpp sql/upsert.cpp sql/returning.cpp sql/using.cpp
   sql/values.cpp sql/coercion.cpp sql/typing.cpp sql/type_lowering.cpp
-  sql/type_adapters.cpp sql/relations.cpp sql/strings.cpp
-  addons/decimal/sql.cpp addons/date/sql.cpp addons/vector/sql.cpp addons/scalars/sql.cpp)
-target_link_libraries(coresql_sql PUBLIC coresql coresql_date coresql_decimal coresql_vector)
+  sql/type_adapters.cpp sql/relations.cpp sql/strings.cpp sql/query_cache.cpp
+  addons/blob/sql.cpp addons/decimal/sql.cpp addons/date/sql.cpp addons/vector/sql.cpp addons/scalars/sql.cpp)
+target_link_libraries(coresql_sql PUBLIC coresql coresql_date coresql_decimal coresql_vector coresql_blob)
 target_compile_options(coresql_sql PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 
 # Identical target names for add_subdirectory() and installed find_package().
-set(CORESQL_LIBRARIES coresql coresql_sql coresql_vector coresql_timestamp coresql_spatial coresql_json coresql_graph coresql_date coresql_decimal)
+set(CORESQL_LIBRARIES coresql coresql_blob coresql_sql coresql_vector coresql_timestamp coresql_spatial coresql_json coresql_graph coresql_date coresql_decimal)
 foreach(target IN LISTS CORESQL_LIBRARIES)
   if(target STREQUAL "coresql")
     set(component core)
@@ -87,6 +88,11 @@ add_executable(coresql_custom_type examples/custom_type/main.cpp examples/custom
 target_link_libraries(coresql_custom_type PRIVATE coresql_sql)
 
 add_executable(coresql_demo examples/demo.cpp)
+find_package(Threads REQUIRED)
+add_library(coresql_landmark_worker STATIC examples/landmark_memory/worker.cpp)
+target_link_libraries(coresql_landmark_worker PUBLIC coresql_sql Threads::Threads)
+add_executable(coresql_landmark_memory examples/landmark_memory/main.cpp)
+target_link_libraries(coresql_landmark_memory PRIVATE coresql_sql)
 target_link_libraries(coresql_demo PRIVATE coresql_vector coresql_timestamp)
 add_executable(coresql_documents examples/documents.cpp)
 target_link_libraries(coresql_documents PRIVATE coresql_vector coresql_timestamp)
@@ -112,6 +118,21 @@ function(coresql_test target name source)
 endfunction()
 
 if(BUILD_TESTING)
+  coresql_test(coresql_sql_compatibility_test sql_compatibility tests/sql_compatibility_test.cpp coresql_sql)
+  coresql_test(coresql_composite_range_test composite_range tests/composite_range_test.cpp coresql_sql)
+  coresql_test(coresql_constraint_recovery_test constraint_recovery tests/constraint_recovery_test.cpp coresql_sql)
+  target_compile_definitions(coresql_constraint_recovery_test PRIVATE CORESQL_TESTING)
+  coresql_test(coresql_query_cache_test query_cache tests/query_cache_test.cpp coresql_sql)
+  coresql_test(coresql_upsert_test upsert tests/upsert_test.cpp coresql_sql)
+  coresql_test(coresql_blob_test blob tests/blob_test.cpp coresql_sql)
+  coresql_test(coresql_constraints_test constraints tests/constraints_test.cpp coresql_sql)
+  coresql_test(coresql_landmark_worker_test landmark_worker tests/landmark_worker_test.cpp coresql_landmark_worker)
+  coresql_test(coresql_query_control_test query_control tests/query_control_test.cpp coresql_sql)
+  target_compile_definitions(coresql_query_control_test PRIVATE CORESQL_TESTING)
+  coresql_test(coresql_sql_application_features_test sql_application_features tests/sql_application_features_test.cpp coresql_sql)
+  coresql_test(coresql_native_join_test native_hash_joins tests/native_join_test.cpp coresql_sql)
+  target_compile_definitions(coresql_native_join_test PRIVATE CORESQL_TESTING)
+  coresql_test(coresql_landmark_memory_test landmark_memory tests/landmark_memory_test.cpp coresql_sql)
   coresql_test(coresql_sql_type_dispatch_test sql_type_dispatch tests/sql_type_dispatch_test.cpp coresql_sql coresql_timestamp)
   target_compile_definitions(coresql_sql_type_dispatch_test PRIVATE CORESQL_TESTING)
   coresql_test(coresql_sql_scalar_adapter_test sql_scalar_adapters tests/sql_scalar_adapter_test.cpp coresql_sql)
@@ -144,6 +165,8 @@ if(BUILD_TESTING)
   target_compile_definitions(coresql_table_view_test PRIVATE CORESQL_TESTING)
   coresql_test(coresql_stream_aggregate_test streaming_aggregates tests/stream_aggregate_test.cpp coresql)
   target_compile_definitions(coresql_stream_aggregate_test PRIVATE CORESQL_TESTING)
+  coresql_test(coresql_borrowed_on_test borrowed_on_joins tests/borrowed_on_test.cpp coresql)
+  target_compile_definitions(coresql_borrowed_on_test PRIVATE CORESQL_TESTING)
   coresql_test(coresql_outer_hash_test outer_hash_candidates tests/outer_hash_test.cpp coresql_sql)
   target_compile_definitions(coresql_outer_hash_test PRIVATE CORESQL_TESTING)
   coresql_test(coresql_correlated_source_test correlated_sources tests/correlated_source_test.cpp coresql_sql)
@@ -248,6 +271,14 @@ endif()
 
 # SQLite is an optional test/benchmark oracle and never links into the core.
 if(CORESQL_BENCHMARKS)
+  add_executable(coresql_landmark_latency benchmarks/landmark_latency.cpp)
+  target_link_libraries(coresql_landmark_latency PRIVATE coresql_landmark_worker)
+  add_executable(coresql_prepared_profile benchmarks/prepared_profile.cpp)
+  target_link_libraries(coresql_prepared_profile PRIVATE coresql_sql)
+  add_executable(coresql_landmark_soak benchmarks/landmark_soak.cpp)
+  target_link_libraries(coresql_landmark_soak PRIVATE coresql_landmark_worker)
+  add_executable(coresql_operational_profile benchmarks/operational_profile.cpp)
+  target_link_libraries(coresql_operational_profile PRIVATE coresql_sql)
   set(CORESQL_SQLITE_SOURCE "" CACHE PATH "Pinned SQLite source directory produced by benchmarks/reference/prepare.py")
   if(NOT EXISTS "${CORESQL_SQLITE_SOURCE}/test/speedtest1.c")
     message(FATAL_ERROR "Set CORESQL_SQLITE_SOURCE to the source directory from benchmarks/reference/prepare.py; see benchmarks/reference/README.md")

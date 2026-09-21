@@ -71,4 +71,5 @@ SqlTypeAdapter text_adapter();
 SqlTypeAdapter decimal_adapter();
 SqlTypeAdapter date_adapter();
 SqlTypeAdapter vector_adapter();
+SqlTypeAdapter blob_adapter();
 } // namespace coresql::sql

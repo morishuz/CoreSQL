@@ -78,6 +78,7 @@ struct BoundExpr {
         return {nullptr, evaluate(row, registry)};
     }
     template <class R> Value evaluate(const R& row, const Registry& registry) const {
+        query_step();
         if (reused) {
             if (!*reused)
                 *reused = evaluate_uncached(row, registry);
@@ -276,7 +277,9 @@ struct BoundPredicate {
 };
 BoundExpr bind(const Expr&, const Scope&, const Registry&, unsigned depth = 0);
 std::optional<BoundPredicate> bind_predicate(const std::optional<Predicate>&, const Scope&, const Registry&);
-std::optional<IndexResult> candidates(const Table&, std::optional<BoundPredicate>&);
+std::optional<IndexResult> candidates(const Table&, std::optional<BoundPredicate>&, const Registry&);
+std::optional<IndexResult> composite_candidates(const Table&, const std::optional<BoundPredicate>&,
+                                                const Registry&);
 void normalize(IndexResult&);
 
 // Rewriting visits captured arguments but not a nested subquery's local scope.

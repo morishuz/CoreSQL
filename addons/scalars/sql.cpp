@@ -297,6 +297,31 @@ void install_scalar_sql(Registry& r) {
                                     return std::make_unique<ConvertedAggregate>(std::move(inner), input);
                                 }});
     }
+    r.add(Function{"sql.numeric_round",
+                   [scalar](std::span<const Type> t) {
+                       if (t.size() != 1 && t.size() != 2)
+                           throw Error(ErrorCode::type, "ROUND expects one or two arguments");
+                       scalar(t, t.size());
+                       return real();
+                   },
+                   [](std::span<const Value> args) -> Value {
+                       auto value = unpack(args[0]);
+                       if (is_null(value))
+                           return Null(real());
+                       const double x = real_value(numeric_value(value));
+                       int digits = 0;
+                       if (args.size() == 2) {
+                           auto precision = unpack(args[1]);
+                           if (is_null(precision))
+                               return Null(real());
+                           digits =
+                               static_cast<int>(std::clamp(real_value(numeric_value(precision)), 0.0, 30.0));
+                       }
+                       if (std::abs(x) >= 4503599627370496.0)
+                           return x;
+                       const double scale = std::pow(10.0, digits);
+                       return std::round(x * scale) / scale;
+                   }});
     for (std::string op : {"negate", "abs"})
         r.add(Function{"sql.numeric_" + op,
                        [scalar, op](std::span<const Type> t) {
@@ -359,6 +384,8 @@ std::optional<SqlOperation> scalar_operation(std::string_view op, std::span<cons
     auto scalar = [](const Type& t) { return t.id.empty() || scalar_type(t); };
     if (types.empty() || !std::all_of(types.begin(), types.end(), scalar))
         return {};
+    if (op == "round" && (types.size() == 1 || types.size() == 2))
+        return SqlOperation{"sql.numeric_round", {}, {}, true};
     if (types.size() == 2 && types[0] == integer() && types[1] == integer()) {
         if (op == "+")
             return SqlOperation{"integer.add"};

@@ -198,6 +198,7 @@ Database Database::open(const std::filesystem::path& path, Registry registry) {
     auto storage=std::make_shared<detail::DurableStore>(path);
     auto recovered = std::make_shared<detail::State>(storage->recover(registry));
     detail::rebuild_indexes(*recovered, registry);
+    detail::validate_constraints(recovered->tables, registry);
     Database database(std::move(registry));
     database.owner_->current = std::move(recovered);
     database.owner_->storage=std::move(storage);

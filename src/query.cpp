@@ -7,6 +7,7 @@ thread_local unsigned query_depth = 0;
 } // namespace
 
 Result run(const detail::Tables& tables, const Query& query, const Registry& registry) {
+    query_step();
     struct BindingContext {
         const detail::Tables* before = binding_tables;
         explicit BindingContext(const detail::Tables& t) {
@@ -59,6 +60,45 @@ Result run(const detail::Tables& tables, const Query& query, const Registry& reg
     if (query.distinct)
         return run_distinct(tables, query, registry);
     return run_scan(tables, query, registry);
+}
+
+StreamResult stream(const Tables& tables, const Query& query, const Registry& registry,
+                    const RowVisitor& visit) {
+    if (!visit)
+        fail(ErrorCode::state, "Streaming requires a row visitor");
+    if (query.table.empty() || query.join || !query.joins.empty() || !query.relations.empty() ||
+        !query.compounds.empty() || !query.order_by.empty() || !query.group_by.empty() || query.having ||
+        query.distinct || query.offset || query.source_where ||
+        std::any_of(query.select.begin(), query.select.end(), has_aggregate))
+        fail(ErrorCode::unsupported,
+             "Streaming requires a single-table scan without ordering, grouping or offset");
+    // Establish normal binding/nesting context and validate the entire shape first.
+    Query shape = query;
+    shape.limit = 0;
+    auto types = run(tables, shape, registry).types;
+    if (query_depth >= 64)
+        fail(ErrorCode::schema, "Query nesting exceeds 64");
+    ++query_depth;
+    const auto* previous = binding_tables;
+    struct Restore {
+        const Tables* previous;
+        ~Restore() {
+            binding_tables = previous;
+            --query_depth;
+        }
+    } restore{previous};
+    binding_tables = &tables;
+    StreamResult result{std::move(types)};
+    RowVisitor counted = [&](std::span<const Value> row) {
+        ++result.rows;
+        if (!visit(row)) {
+            result.stopped = true;
+            return false;
+        }
+        return true;
+    };
+    run_scan(tables, query, registry, {}, nullptr, nullptr, &counted);
+    return result;
 }
 
 } // namespace coresql::detail::execution

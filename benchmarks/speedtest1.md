@@ -128,3 +128,11 @@ result materialization. SQLite preparation also compiles its executable statemen
 The phases have different boundaries and must not be presented as equivalent work.
 The maintenance-equivalent caveat still applies. The original API mode remains
 available and neither mode implies a current performance claim.
+
+## Additional SQL workload coverage
+
+The [curated suite](suite/README.md) runs this full SQL adapter at multiple sizes
+and adds separately attributed star-schema and floating-point query cases. Their
+deterministic reduced setup and untimed loading differ from upstream speedtest1;
+they are not presented as full `star` or `fp` testset parity. Unsupported cases
+remain visible alongside successful reference-checked timings.

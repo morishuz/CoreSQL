@@ -44,6 +44,7 @@ before relying on persistence, and use [verified backups](usage.md#backup-and-re
 | `CoreSQL::json` | JSON values and typed JSON Pointer key extraction |
 | `CoreSQL::graph` | Directed graph facade and bounded traversal |
 | `CoreSQL::spatial` | Cartesian boxes and an interval search index |
+| `CoreSQL::blob` | Binary payloads, byte ordering and hex conversion |
 | `CoreSQL::vector` | Float32 vectors and squared L2 distance |
 | `CoreSQL::decimal` | Checked fixed-point arithmetic and aggregates |
 | `CoreSQL::date` | Gregorian dates, ISO parsing and chronological ordering |
@@ -60,6 +61,7 @@ Each contract is the maintained reference for its subject:
 - [SQL](contracts/sql.md): syntax, coercion, generated IDs and unsupported forms.
 - [Relational API](contracts/relational.md): queries, NULLs, joins, aggregation,
   schema operations and callback evaluation rules.
+- [Execution controls](contracts/execution.md): cancellation, work limits and streaming scans.
 - [Storage](contracts/storage.md): atomicity, durability, recovery, formats,
   ownership and resource limits.
 - [Extensions](contracts/extensions.md): type/index registration, callback

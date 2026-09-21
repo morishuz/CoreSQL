@@ -15,7 +15,7 @@
 namespace coresql {
 namespace {
 constexpr std::size_t max_snapshot = detail::max_encoded_bytes;
-constexpr std::string_view magic = "CORESQL5";
+constexpr std::string_view magic = "CORESQL6";
 using encoding::Reader;
 ByteView view(std::string_view s) {
     return std::as_bytes(std::span(s.data(), s.size()));
@@ -54,6 +54,46 @@ std::size_t count(Reader& reader) {
 }
 void write_value(Bytes&, const Value&);
 Value read_value(Reader&, const Type&, const Registry&, bool tagged);
+void write_expr(Bytes& data, const Expr& e) {
+    encoding::u64(data, static_cast<std::uint64_t>(e.kind));
+    field(data, view(e.name));
+    if (e.kind == Expr::Kind::literal) {
+        const auto type = type_of(e.value);
+        field(data, view(type.id));
+        encoding::u64(data, type.version);
+        field(data, type.parameters);
+        write_value(data, e.value);
+    }
+    encoding::u64(data, e.arguments.size());
+    for (const auto& argument : e.arguments)
+        write_expr(data, argument);
+}
+Expr read_expr(Reader& reader, const Registry& registry, std::size_t& nodes, unsigned depth = 0) {
+    if (++nodes > 4096 || depth > 64)
+        throw Error(ErrorCode::format, "CHECK expression is too large");
+    const auto kind = reader.u64();
+    if (kind > static_cast<std::uint64_t>(Expr::Kind::membership))
+        throw Error(ErrorCode::format, "Invalid CHECK expression kind");
+    Expr e{static_cast<Expr::Kind>(kind), string(reader), std::int64_t{0}, {}};
+    if (e.kind == Expr::Kind::literal) {
+        auto id = string(reader);
+        auto version = reader.u64();
+        auto parameters = field(reader);
+        if (!version || version > UINT32_MAX)
+            throw Error(ErrorCode::format, "Invalid literal type version");
+        Type type{std::move(id), static_cast<std::uint32_t>(version),
+                  Bytes(parameters.begin(), parameters.end())};
+        registry.validate(type);
+        e.value = read_value(reader, type, registry, true);
+        registry.validate(e.value, type);
+    }
+    const auto width = count(reader);
+    if (width > 4096 - nodes)
+        throw Error(ErrorCode::format, "CHECK expression is too large");
+    for (std::size_t i = 0; i < width; ++i)
+        e.arguments.push_back(read_expr(reader, registry, nodes, depth + 1));
+    return e;
+}
 void write_schema(Bytes& data, const detail::Table& table) {
     const auto& columns = table.columns;
     encoding::u64(data, columns.size());
@@ -79,9 +119,26 @@ void write_schema(Bytes& data, const detail::Table& table) {
             encoding::u64(data, !d.descending.empty() && d.descending[i]);
         }
     }
+    encoding::u64(data, table.constraints.checks.size());
+    for (const auto& check : table.constraints.checks) {
+        field(data, view(check.name));
+        detail::validate_check_expression(check.expression);
+        write_expr(data, check.expression);
+    }
+    encoding::u64(data, table.constraints.foreign_keys.size());
+    for (const auto& key : table.constraints.foreign_keys) {
+        field(data, view(key.name));
+        field(data, view(key.referenced_table));
+        encoding::u64(data, key.columns.size());
+        for (const auto& c : key.columns)
+            field(data, view(c));
+        encoding::u64(data, key.referenced_columns.size());
+        for (const auto& c : key.referenced_columns)
+            field(data, view(c));
+    }
 }
 detail::Table read_schema(Reader& reader, const Registry& registry, bool primary, bool indexes, bool extended,
-                          bool tagged) {
+                          bool tagged, bool constrained) {
     detail::Table table;
     const auto n = count(reader);
     if (!n)
@@ -133,6 +190,29 @@ detail::Table read_schema(Reader& reader, const Registry& registry, bool primary
                 d.descending.push_back(descending != 0);
             }
             table.index_definitions.push_back(std::move(d));
+        }
+    }
+    if (constrained) {
+        const auto nchecks = count(reader);
+        for (std::size_t i = 0; i < nchecks; ++i) {
+            auto name = string(reader);
+            std::size_t nodes = 0;
+            auto expression = read_expr(reader, registry, nodes);
+            detail::validate_check_expression(expression);
+            table.constraints.checks.push_back({std::move(name), std::move(expression)});
+        }
+        const auto nkeys = count(reader);
+        for (std::size_t i = 0; i < nkeys; ++i) {
+            ForeignKey key;
+            key.name = string(reader);
+            key.referenced_table = string(reader);
+            const auto ncolumns = count(reader);
+            for (std::size_t j = 0; j < ncolumns; ++j)
+                key.columns.push_back(string(reader));
+            const auto nparent = count(reader);
+            for (std::size_t j = 0; j < nparent; ++j)
+                key.referenced_columns.push_back(string(reader));
+            table.constraints.foreign_keys.push_back(std::move(key));
         }
     }
     detail::make_indexes(table, registry);
@@ -274,44 +354,49 @@ Database Database::decode(ByteView bytes, Registry registry) {
     detail::validate_snapshot(bytes);
     Reader reader(bytes.first(bytes.size() - 8));
     auto format = string(reader);
-    if (format != magic && format != "CORESQL4" && format != "CORESQL3" && format != "CORESQL2" &&
-        format != "CORESQL1")
+    if (format != magic && format != "CORESQL5" && format != "CORESQL4" && format != "CORESQL3" &&
+        format != "CORESQL2" && format != "CORESQL1")
         throw Error(ErrorCode::format, "Unsupported snapshot format/version");
     Database database(std::move(registry));
     auto transaction = database.begin();
     auto tables = count(reader);
+    std::map<std::string, TableConstraints> constraints;
+    const bool tagged = format == magic || format == "CORESQL5";
+    const bool extended = tagged || format == "CORESQL4";
     for (std::size_t t = 0; t < tables; ++t) {
         auto name = string(reader);
         auto schema = read_schema(reader, database.owner_->registry, format != "CORESQL1",
-                                  format == "CORESQL3" || format == "CORESQL4" || format == magic,
-                                  format == "CORESQL4" || format == magic, format == magic);
+                                  format == "CORESQL3" || extended, extended, tagged, format == magic);
+        constraints.emplace(name, std::move(schema.constraints));
         const auto& columns = schema.columns;
         const auto ncolumns = columns.size();
         transaction.create_table(name, columns);
         for (const auto& d : schema.index_definitions)
             transaction.create_index(name, d);
-        auto next_rowid = (format == magic || format == "CORESQL4") ? reader.u64() : 0;
+        auto next_rowid = extended ? reader.u64() : 0;
         std::set<std::uint64_t> rowids;
         auto rows = count(reader);
         if (rows > reader.remaining() / 8 / ncolumns)
             throw Error(ErrorCode::format, "Invalid snapshot row count");
         for (std::size_t r = 0; r < rows; ++r) {
-            auto rowid = (format == magic || format == "CORESQL4") ? reader.u64() : r + 1;
+            auto rowid = extended ? reader.u64() : r + 1;
             if (!rowid || rowid >= INT64_MAX || !rowids.insert(rowid).second)
                 throw Error(ErrorCode::format, "Invalid row identity");
             Row row;
             for (const auto& column : columns) {
-                row.push_back(read_value(reader, column.type, database.owner_->registry, format == magic));
+                row.push_back(read_value(reader, column.type, database.owner_->registry, tagged));
             }
             transaction.insert_impl(name, std::move(row), static_cast<std::int64_t>(rowid));
         }
-        if (format == magic || format == "CORESQL4") {
+        if (extended) {
             if (!next_rowid || next_rowid > INT64_MAX || (!rowids.empty() && next_rowid <= *rowids.rbegin()))
                 throw Error(ErrorCode::format, "Invalid row identity sequence");
             transaction.restore_row_sequence(name, static_cast<std::int64_t>(next_rowid));
         }
     }
     reader.end();
+    for (auto& [name, declarations] : constraints)
+        transaction.set_constraints(name, std::move(declarations));
     transaction.commit();
     return database;
 }
@@ -337,7 +422,7 @@ std::size_t detail::checkpoint_size(const State& state) {
 Bytes detail::encode_changes(const State& base, const State& next) {
     checkpoint_size(next);
     Bytes data;
-    field(data, view("CORECHG6"));
+    field(data, view("CORECHG7"));
     std::size_t changed = 0;
     for (const auto& [name, table] : next.tables) {
         auto old = base.tables.find(name);
@@ -397,8 +482,10 @@ detail::State detail::apply_changes(const State& base, ByteView bytes, const Reg
     Reader reader(bytes.first(bytes.size() - 8));
     auto format = string(reader);
     if (format != "CORECHG2" && format != "CORECHG3" && format != "CORECHG4" && format != "CORECHG5" &&
-        format != "CORECHG6")
+        format != "CORECHG6" && format != "CORECHG7")
         throw Error(ErrorCode::format, "Unsupported change record");
+    const bool tagged = format == "CORECHG6" || format == "CORECHG7";
+    const bool extended = tagged || format == "CORECHG5";
     State next = base;
     std::set<std::string> seen;
     auto tables = count(reader);
@@ -410,25 +497,25 @@ detail::State detail::apply_changes(const State& base, ByteView bytes, const Reg
         auto old = base.tables.find(name);
         if (old != base.tables.end())
             *table = *old->second;
-        auto declarations = read_schema(reader, registry, format != "CORECHG2",
-                                        format == "CORECHG4" || format == "CORECHG5" || format == "CORECHG6",
-                                        format == "CORECHG5" || format == "CORECHG6", format == "CORECHG6");
+        auto declarations =
+            read_schema(reader, registry, format != "CORECHG2", format == "CORECHG4" || extended, extended,
+                        tagged, format == "CORECHG7");
         const auto columns = declarations.columns.size();
         if (old != base.tables.end()) {
             if (declarations.columns.size() < table->columns.size() ||
                 !std::equal(table->columns.begin(), table->columns.end(), declarations.columns.begin()))
                 throw Error(ErrorCode::format, "Existing column changed in log");
-            if (declarations.columns.size() != table->columns.size() && format != "CORECHG5" &&
-                format != "CORECHG6")
+            if (declarations.columns.size() != table->columns.size() && !extended)
                 throw Error(ErrorCode::format, "Schema changed in legacy log");
         }
+        table->constraints = std::move(declarations.constraints);
         table->columns = std::move(declarations.columns);
         table->index_definitions = std::move(declarations.index_definitions);
         auto next_id = reader.u64();
         if (next_id < table->next_chunk)
             throw Error(ErrorCode::format, "Chunk sequence moved backwards");
         table->next_chunk = next_id;
-        if (format == "CORECHG5" || format == "CORECHG6") {
+        if (extended) {
             auto next_rowid = reader.u64();
             if (next_rowid < static_cast<std::uint64_t>(table->next_rowid) || next_rowid > INT64_MAX)
                 throw Error(ErrorCode::format, "Invalid row sequence");
@@ -448,15 +535,13 @@ detail::State detail::apply_changes(const State& base, ByteView bytes, const Reg
             }
             auto chunk = std::make_shared<Chunk>();
             for (std::uint64_t r = 0; r < rows; ++r) {
-                auto rowid = (format == "CORECHG5" || format == "CORECHG6")
-                                 ? reader.u64()
-                                 : static_cast<std::uint64_t>(table->next_rowid++);
+                auto rowid = (extended) ? reader.u64() : static_cast<std::uint64_t>(table->next_rowid++);
                 if (!rowid || rowid >= static_cast<std::uint64_t>(table->next_rowid))
                     throw Error(ErrorCode::format, "Invalid row identity");
                 chunk->rowids.push_back(static_cast<std::int64_t>(rowid));
                 Row row;
                 for (const auto& column : table->columns) {
-                    row.push_back(read_value(reader, column.type, registry, format == "CORECHG6"));
+                    row.push_back(read_value(reader, column.type, registry, tagged));
                     detail::validate_stored(row.back(), column, registry);
                 }
                 chunk->rows.push_back(std::move(row));

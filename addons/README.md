@@ -13,6 +13,7 @@ Broader providers use descriptive names such as `graph.cpp` and `index.cpp`.
 | `hash_index/` | `index.cpp` | — | `CoreSQL::core` |
 | `date/` | `type.cpp` | `sql.cpp` | `CoreSQL::date`; adapter in `CoreSQL::sql` |
 | `decimal/` | `type.cpp` | `sql.cpp` | `CoreSQL::decimal`; adapter in `CoreSQL::sql` |
+| `blob/` | `type.cpp` | `sql.cpp` | `CoreSQL::blob`; adapter in `CoreSQL::sql` |
 | `vector/` | `type.cpp` | `sql.cpp` | `CoreSQL::vector`; adapter in `CoreSQL::sql` |
 | `timestamp/` | `type.cpp` | — | `CoreSQL::timestamp` |
 | `json/` | `type.cpp` | — | `CoreSQL::json` |

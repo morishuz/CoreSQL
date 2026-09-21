@@ -1,6 +1,6 @@
 #include "bound.hpp"
 #include "query_stages.hpp"
-#include "integer_join_positions.hpp"
+#include "native_join.hpp"
 #include "input_filter.hpp"
 #include <set>
 
@@ -21,7 +21,7 @@ Result run_filtered_join(const Tables& tables, const Query& query, const Registr
     const auto& original = *require_table(tables, query.join->table);
     if (query.repeatable && query.limit) {
         auto predicate = bind_predicate(source.where, original, registry);
-        auto candidates_ = candidates(original, predicate);
+        auto candidates_ = candidates(original, predicate, registry);
         if (candidates_)
             normalize(*candidates_);
         std::vector<RowLocation> selected;
@@ -95,8 +95,16 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
     auto shape = run(working, probe, registry);
     if (!query.limit)
         return shape;
+    // Preserve the two execution phases: all ON callbacks finish before any
+    // WHERE/order/projection callback. Only row ownership changes here.
+    const bool borrow = join.kind == JoinKind::inner && !query.distinct && query.group_by.empty() &&
+                        !query.having && !query.search &&
+                        std::none_of(query.select.begin(), query.select.end(), has_aggregate) &&
+                        std::none_of(query.order_by.begin(), query.order_by.end(),
+                                     [](const Order& o) { return has_aggregate(o.expression); });
+    std::vector<RowView> joined_rows;
     std::vector<std::size_t> retained;
-    if (!query.select.empty()) {
+    if (!borrow && !query.select.empty()) {
         std::set<std::size_t> needed;
         auto expressions = final;
         transform_query(expressions, [&](Expr& e) {
@@ -125,7 +133,7 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
         rights.push_back(&row);
         return true;
     });
-    IntegerJoinPositions lookup;
+    NativeJoinPositions lookup;
     std::optional<std::pair<std::size_t, std::size_t>> key_columns;
     const auto* key = on ? &*on : nullptr;
     while (key && key->kind == Predicate::Kind::all && !key->children.empty())
@@ -133,8 +141,8 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
     if (key && key->leaf && key->leaf->operation == Compare::equal) {
         const auto& a = key->leaf->left;
         const auto& b = key->leaf->right;
-        if (a.kind == Expr::Kind::column && b.kind == Expr::Kind::column &&
-            native_i64(registry.addon(a.type)) && native_i64(registry.addon(b.type))) {
+        if (a.kind == Expr::Kind::column && b.kind == Expr::Kind::column && a.type == b.type &&
+            native_join_key(registry.addon(a.type))) {
             auto x = a.index, y = b.index;
             if (x >= left.columns.size())
                 std::swap(x, y);
@@ -144,6 +152,10 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
     }
     std::vector<bool> matched_right(rights.size(), false);
     auto append = [&](const Row& a, const Row& b) {
+        if (borrow) {
+            joined_rows.emplace_back(a, b);
+            return;
+        }
         Row row;
         row.reserve(retained.size());
         RowView input(a, b);
@@ -154,6 +166,7 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
     visit_table_rows(left, [&](auto, const Row& a, auto) {
         bool matched = false;
         auto candidate = [&](std::size_t i) {
+            query_step();
 #ifdef CORESQL_TESTING
             if (auto* counters = detail::active_query_counters)
                 ++counters->candidate_pairs;
@@ -165,7 +178,8 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
             }
         };
         if (key_columns && !is_null(a[key_columns->first])) {
-            for (auto i : lookup.find(rights, key_columns->second, i64_payload(a[key_columns->first])))
+            for (auto i : lookup.find(rights, key_columns->second, a[key_columns->first], registry,
+                                      left.columns[key_columns->first].type))
                 candidate(i);
         } else {
             for (std::size_t i = 0; i < rights.size(); ++i)
@@ -179,6 +193,14 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
         for (std::size_t i = 0; i < rights.size(); ++i)
             if (!matched_right[i])
                 append(null_left, *rights[i]);
+    if (borrow) {
+#ifdef CORESQL_TESTING
+        if (auto* counters = detail::active_query_counters)
+            counters->stages.push_back({"join_pairs", joined_rows.size(), data.types.size(), 0,
+                                        joined_rows.capacity() * sizeof(RowView)});
+#endif
+        return run_scan(tables, query, registry, {}, nullptr, &joined_rows);
+    }
     final.table = materialize(working, std::move(data));
     return run(working, final, registry);
 }
@@ -212,8 +234,8 @@ Result run_multi_join(const Tables& tables, const Query& query, const Registry& 
             scope.left_alias = query.alias;
             scope.right = require_table(tables, join.table).get();
             scope.right_alias = join.alias;
-            if (join.cross || (native_i64(registry.addon(scope.resolve(join.left).second)) &&
-                               native_i64(registry.addon(scope.resolve(join.right).second)))) {
+            if (join.cross || (native_join_key(registry.addon(scope.resolve(join.left).second)) &&
+                               native_join_key(registry.addon(scope.resolve(join.right).second)))) {
                 auto direct = query;
                 direct.joins.clear();
                 direct.join = join;
@@ -289,7 +311,7 @@ Result run_multi_join(const Tables& tables, const Query& query, const Registry& 
             return false;
         const auto& schema = require_table(tables, name)->columns;
         return std::any_of(schema.begin(), schema.end(), [&](const Column& c) {
-            return c.name == e.name && native_i64(registry.addon(c.type));
+            return c.name == e.name && native_join_key(registry.addon(c.type));
         });
     };
     std::size_t stage = 0;

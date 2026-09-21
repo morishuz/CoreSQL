@@ -4,6 +4,8 @@ Benchmark tools are optional and do not link SQLite or DuckDB into CoreSQL.
 Use equivalent inputs, disclose adaptations and check answers before making
 performance claims. In-memory commits do not measure durable write performance.
 
+- [Durable operations and landmark-memory pilot](operational.md)
+- [Combined public SQL suite: speedtest1, DuckDB micro, H2O and TPC-H](suite/README.md)
 - [TPC-H Q1–Q22: setup, validation and measurement](tpch/README.md)
 - [Retained September 15, 2026 comparison](tpch/results/OPTIMIZATION_ROUND2.md)
 - [speedtest1 adapter: coverage, semantics and reproduction](speedtest1.md)
@@ -49,3 +51,35 @@ hashes and environment details with any published table. Report failures and
 resource limits without assigning speed ratios. The retained TPC-H evidence
 supports the README's historical claim; rerun on an exact release revision before
 claiming release performance.
+
+## General ON join profiling
+
+`join_profile.cpp` compares general ON joins, equality joins and a scan control
+using the native API. Each join input has `rows` rows, with `fanout` matches per
+left row and a configurable text payload. Setup and exact result/order checks
+are outside timing; each process warms up once before measured repetitions.
+This is an in-memory read workload, not a durability or reference-engine comparison.
+
+```sh
+cmake -S . -B build/profile -DCMAKE_BUILD_TYPE=Release
+cmake --build build/profile --target coresql -j 4
+c++ -O3 -DNDEBUG -std=c++20 -I include benchmarks/join_profile.cpp \
+  benchmarks/allocation_profile.cpp build/profile/libcoresql.a -o /tmp/coresql_join_profile
+/tmp/coresql_join_profile general 10000 4 256 7 time
+/tmp/coresql_join_profile equality 10000 4 256 7 time
+/tmp/coresql_join_profile scan 10000 4 256 7 time
+/tmp/coresql_join_profile general 10000 4 256 1 alloc
+```
+
+CSV fields are mode, input rows per table, fanout, text bytes, repetitions and
+median query milliseconds (upper median for even repetition counts). Allocation
+mode emits allocation calls and requested bytes to stderr; requested bytes are
+cumulative allocation traffic, not peak live memory. Do not use allocation-mode
+timings for comparisons. The diagnostic allocator is linked only into this
+executable. It adds an inactive branch to allocations even in timing mode, so
+compare binaries built with the same instrumentation.
+
+For revision comparisons, retain separate binaries, alternate execution order,
+and run with other build/profile jobs idle. Record source/binary fingerprints
+and raw repetitions outside the tracked source tree. A process peak-RSS measure
+includes setup and result ownership; report it separately from allocation traffic.

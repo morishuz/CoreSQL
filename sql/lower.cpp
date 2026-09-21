@@ -58,8 +58,13 @@ Expr Lowerer::expression(const Node& n) const {
     case Node::parameter:
         if (n.position >= parameters.size())
             throw Error(ErrorCode::type, "Missing SQL parameter");
+        if (parameterize && !is_null(parameters[n.position]))
+            return parameter("\x01sql.parameter." + std::to_string(n.position));
         return literal(parameters[n.position]);
     case Node::column: {
+        if (n.qualifier.empty())
+            if (auto merged = merged_columns.find(n.name); merged != merged_columns.end())
+                return expression(merged->second);
         std::vector<const Source*> matches;
         for (const auto& s : sources) {
             if (!n.qualifier.empty() && n.qualifier != s.alias)
@@ -291,6 +296,8 @@ Expr Lowerer::expression(const Node& n) const {
         }
         std::vector<Expr> args;
         if (n.args.size() == 1 && n.args[0].kind == Node::star) {
+            if (!n.args[0].qualifier.empty())
+                unsupported("Qualified star is only valid in SELECT projection");
             if (n.name != "count")
                 unsupported("Only count accepts star");
         } else
@@ -344,7 +351,8 @@ Predicate Lowerer::predicate(const Node& n) const {
         if (n.name == "between") {
             auto e = expression(n.args[0]), lo = expression(n.args[1]), hi = expression(n.args[2]);
             auto simple = [](const Expr& x) {
-                return x.kind == Expr::Kind::column || x.kind == Expr::Kind::literal;
+                return x.kind == Expr::Kind::column || x.kind == Expr::Kind::literal ||
+                       x.kind == Expr::Kind::parameter;
             };
             if (simple(e) && simple(lo) && simple(hi) && expression_type(e) == expression_type(lo) &&
                 expression_type(e) == expression_type(hi))
@@ -364,6 +372,8 @@ Predicate Lowerer::predicate(const Node& n) const {
     return {truth(expression(n)), Compare::not_equal, literal(std::int64_t{0})};
 }
 Value Lowerer::constant(const Node& n) const {
-    return evaluate_constant(expression(n), registry);
+    auto constants = *this;
+    constants.parameterize = false;
+    return evaluate_constant(constants.expression(n), registry);
 }
 } // namespace coresql::sql::detail

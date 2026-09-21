@@ -45,6 +45,7 @@ struct Table {
     // Published database tables never carry a selection or inherit view indexes.
     std::optional<std::vector<RowLocation>> selection;
     std::vector<Column> columns;
+    TableConstraints constraints;
     ChunkMap chunks;
     std::uint64_t next_chunk = 0;
     std::int64_t next_rowid = 1;
@@ -55,6 +56,11 @@ struct Table {
     std::vector<std::shared_ptr<OrderedIndex>> ordered;
 };
 using Tables = std::map<std::string, std::shared_ptr<Table>>;
+void validate_constraints(const Tables&, const Registry&, const std::string& changed = {});
+void validate_insert_constraints(const Tables&, const std::string&, const Row&, const Registry&);
+void validate_replacement_constraints(const Tables&, const std::string&, const std::shared_ptr<Table>&,
+                                      const Registry&);
+void validate_check_expression(const Expr&);
 struct State {
     // Process-local schema epoch: destructive DDL commits use atomic checkpoints.
     std::shared_ptr<const int> schema_epoch;

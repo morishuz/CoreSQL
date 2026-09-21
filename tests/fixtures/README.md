@@ -8,5 +8,5 @@ legacy VALUES(7,'old'). It contains CORECHG5 records in a CORELOG2 log.
 schema and row (row identity 1, next identity 2), encoded according to the old
 codec, including its FNV checksum. Both columns are non-nullable in these formats.
 
-The nullable-storage test reads both fixtures, appends a CORECHG6 record to a
+The nullable-storage test reads both fixtures, appends a current-format CORECHG7 record to a
 copy of the old log, reopens it, and checks that the original constraints survive.

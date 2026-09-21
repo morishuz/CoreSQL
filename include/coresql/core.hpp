@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <chrono>
 #include <compare>
 #include <cstdint>
 #include <filesystem>
@@ -14,6 +15,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <stop_token>
 #include <variant>
 #include <vector>
 
@@ -21,7 +23,18 @@ namespace coresql {
 
 using Bytes = std::vector<std::byte>;
 using ByteView = std::span<const std::byte>;
-enum class ErrorCode { schema, type, unsupported, conflict, state, format, io, constraint };
+enum class ErrorCode {
+    schema,
+    type,
+    unsupported,
+    conflict,
+    state,
+    format,
+    io,
+    constraint,
+    cancelled,
+    resource
+};
 class Error : public std::runtime_error {
 public:
     ErrorCode code;
@@ -309,6 +322,20 @@ struct Assignment {
     std::string column;
     Expr value;
 };
+struct CheckConstraint {
+    std::string name;
+    Expr expression; // Row-local INTEGER expression: zero rejects; NULL/nonzero pass.
+};
+struct ForeignKey {
+    std::string name;
+    std::vector<std::string> columns;
+    std::string referenced_table;
+    std::vector<std::string> referenced_columns;
+};
+struct TableConstraints {
+    std::vector<CheckConstraint> checks;
+    std::vector<ForeignKey> foreign_keys;
+};
 struct Order {
     Expr expression;
     bool descending = false;
@@ -382,6 +409,20 @@ struct Result {
     std::vector<Type> types;
     std::vector<Row> rows;
 };
+// Cooperative execution controls. Work units are implementation-dependent engine
+// operations, not elapsed time or allocation bytes. Native callbacks cannot be preempted.
+struct QueryOptions {
+    std::stop_token cancellation;
+    std::optional<std::chrono::steady_clock::time_point> deadline;
+    std::size_t max_work = std::numeric_limits<std::size_t>::max();
+};
+// The row is borrowed until the callback returns; false stops successfully.
+using RowVisitor = std::function<bool(std::span<const Value>)>;
+struct StreamResult {
+    std::vector<Type> types;
+    std::size_t rows = 0;
+    bool stopped = false;
+};
 struct Stats {
     std::size_t tables = 0;
     std::size_t rows = 0;
@@ -424,6 +465,10 @@ public:
     StorageStats storage_stats() const;
     Transaction begin();
     Result query(const Query&) const;
+    Result query(const Query&, const QueryOptions&) const;
+    // Streams a single-table scan without ORDER/GROUP/DISTINCT/joins/relations/offset.
+    // Unsupported shapes fail before delivering any rows; callback errors propagate.
+    StreamResult query_each(const Query&, const RowVisitor&, const QueryOptions& = {}) const;
     Stats stats() const;
     // Owned schema copy; safe across commits and database destruction.
     Schema schema() const;
@@ -468,6 +513,13 @@ public:
     Transaction(Transaction&&) noexcept;
     Transaction& operator=(Transaction&&) noexcept;
     void create_table(std::string name, std::vector<Column> columns);
+    // Atomically replace row checks and immediate RESTRICT foreign keys after
+    // validating their schema and all existing rows. No deferred/cascade actions.
+    void set_constraints(const std::string& table, TableConstraints);
+    TableConstraints constraints(const std::string& table) const;
+    // Check a complete row's stored types, nullability and CHECK expressions.
+    // Does not test uniqueness or references; actual mutations enforce those.
+    void validate_row(const std::string& table, const Row&) const;
     void insert(const std::string& table, Row row);
     void create_index(const std::string& table, IndexDefinition);
     std::vector<IndexDefinition> indexes(const std::string& table) const;
@@ -484,7 +536,12 @@ public:
     std::size_t update(const std::string& table, std::vector<Assignment>,
                        std::optional<Predicate> where = {});
     std::size_t erase(const std::string& table, std::optional<Predicate> where = {});
+    // Return affected rows once, after validation: new rows for UPDATE, old for DELETE.
+    Result update_returning(const std::string&, std::vector<Assignment>, std::optional<Predicate> = {});
+    Result erase_returning(const std::string&, std::optional<Predicate> = {});
     Result query(const Query&) const;
+    Result query(const Query&, const QueryOptions&) const;
+    StreamResult query_each(const Query&, const RowVisitor&, const QueryOptions& = {}) const;
     Schema schema() const;
     void commit();
     void rollback() noexcept;
@@ -500,7 +557,10 @@ private:
     void finish_savepoint(SavepointState*, bool restore) noexcept;
     void retarget_savepoints() noexcept;
     std::shared_ptr<detail::Owner> active() const;
-    std::size_t erase_impl(const std::string&, std::optional<Predicate>, std::optional<IndexResult>);
+    std::size_t erase_impl(const std::string&, std::optional<Predicate>, std::optional<IndexResult>,
+                           std::vector<Row>* returning = nullptr);
+    std::size_t update_impl(const std::string&, std::vector<Assignment>, std::optional<Predicate>,
+                            std::vector<Row>*);
     // Snapshot import supplies logical IDs without depending on insertion layout.
     void insert_impl(const std::string&, Row, std::optional<std::int64_t>);
     void restore_row_sequence(const std::string&, std::int64_t);
