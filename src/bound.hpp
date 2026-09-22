@@ -288,7 +288,7 @@ void transform_pred(Predicate&, const std::function<void(Expr&)>&);
 void transform_query(Query&, const std::function<void(Expr&)>&);
 bool has_aggregate(const Expr&);
 bool same_expression(const Expr&, const Expr&);
-std::optional<Query> prepare_disjunctive_join(const Tables&, const Query&);
+std::optional<Query> prepare_disjunctive_join(const Tables&, const Query&, const Registry&);
 std::optional<Query> prepare_membership_join(const Tables&, const Query&, const Registry&);
 extern thread_local const Tables* binding_tables;
 

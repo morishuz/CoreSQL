@@ -7,6 +7,12 @@ compatibility and permanent storage-format compatibility are not guaranteed.
 
 ### Core and persistence
 
+- Unique constraint indexes now persist explicit ownership independently of their
+  names (`CORESQL7`/`CORECHG8`); older files retain constraint protection on import.
+- Streaming checkpoints and buffered persistence share one value encoder. Native
+  i64 add-ons participate in the OR-equality join rewrite; native join paths share
+  a source-ordered merge of matching and NULL candidate positions.
+
 - Opt-in concurrent committed snapshots and read-only SQL connections allow readers
   to run alongside writes. The landmark worker uses a bounded reader pool and
   background checkpoints that preserve commits made during encoding.

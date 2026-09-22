@@ -220,7 +220,7 @@ Result run_multi_join(const Tables& tables, const Query& query, const Registry& 
         probe.limit = 0;
         run(tables, probe, registry);
     }
-    if (auto prepared = prepare_disjunctive_join(tables, query))
+    if (auto prepared = prepare_disjunctive_join(tables, query, registry))
         return run(tables, *prepared, registry);
     if (auto prepared = prepare_membership_join(tables, query, registry))
         return run(tables, *prepared, registry);

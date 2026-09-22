@@ -215,8 +215,8 @@ void Transaction::drop_index(const std::string& name, const std::string& index) 
                            [&](const IndexDefinition& d) { return d.name == index; });
     if (it == replacement->index_definitions.end())
         throw Error(ErrorCode::schema, "Unknown index: " + index);
-    if (index.starts_with("sql.unique."))
-        throw Error(ErrorCode::constraint, "Cannot drop an inline UNIQUE constraint index");
+    if (it->constraint_owned)
+        throw Error(ErrorCode::constraint, "Cannot drop a constraint-owned index");
     auto position = it - replacement->index_definitions.begin();
     replacement->index_definitions.erase(it);
     replacement->ordered.erase(replacement->ordered.begin() + position);

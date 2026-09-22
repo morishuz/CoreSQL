@@ -103,13 +103,7 @@ public:
             ++counters->hash_probes;
 #endif
         const auto& found = keys.find(key);
-        if (nulls.empty())
-            return found;
-        // UNKNOWN must still reach later ON expressions, in nested-loop order.
-        merged.clear();
-        merged.reserve(nulls.size() + found.size());
-        std::merge(nulls.begin(), nulls.end(), found.begin(), found.end(), std::back_inserter(merged));
-        return merged;
+        return merge_join_positions(found, nulls, merged);
     }
 };
 } // namespace coresql::detail::execution

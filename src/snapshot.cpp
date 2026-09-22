@@ -16,7 +16,7 @@
 namespace coresql {
 namespace {
 constexpr std::size_t max_snapshot = detail::max_encoded_bytes;
-constexpr std::string_view magic = "CORESQL6";
+constexpr std::string_view magic = "CORESQL7";
 using encoding::Reader;
 ByteView view(std::string_view s) {
     return std::as_bytes(std::span(s.data(), s.size()));
@@ -113,7 +113,7 @@ void write_schema(Bytes& data, const detail::Table& table) {
     encoding::u64(data, table.index_definitions.size());
     for (const auto& d : table.index_definitions) {
         field(data, view(d.name));
-        encoding::u64(data, d.unique);
+        encoding::u64(data, (d.unique ? 1 : 0) | (d.constraint_owned ? 2 : 0));
         encoding::u64(data, d.columns.size());
         for (std::size_t i = 0; i < d.columns.size(); ++i) {
             field(data, view(d.columns[i]));
@@ -139,7 +139,7 @@ void write_schema(Bytes& data, const detail::Table& table) {
     }
 }
 detail::Table read_schema(Reader& reader, const Registry& registry, bool primary, bool indexes, bool extended,
-                          bool tagged, bool constrained) {
+                          bool tagged, bool constrained, bool owned_indexes) {
     detail::Table table;
     const auto n = count(reader);
     if (!n)
@@ -178,10 +178,14 @@ detail::Table read_schema(Reader& reader, const Registry& registry, bool primary
         for (std::size_t i = 0; i < nindexes; ++i) {
             IndexDefinition d;
             d.name = string(reader);
-            auto unique = reader.u64();
-            if (unique > 1)
-                throw Error(ErrorCode::format, "Invalid unique flag");
-            d.unique = unique != 0;
+            auto flags = reader.u64();
+            if (flags > (owned_indexes ? 3u : 1u) || flags == 2)
+                throw Error(ErrorCode::format, "Invalid index flags");
+            d.unique = (flags & 1) != 0;
+            // Legacy SQL constraints had no ownership bit. Conservatively retain
+            // protection for their reserved names when importing old files.
+            d.constraint_owned =
+                owned_indexes ? (flags & 2) != 0 : d.unique && d.name.starts_with("sql.unique.");
             auto width = count(reader);
             for (std::size_t j = 0; j < width; ++j) {
                 d.columns.push_back(string(reader));
@@ -219,25 +223,30 @@ detail::Table read_schema(Reader& reader, const Registry& registry, bool primary
     detail::make_indexes(table, registry);
     return table;
 }
-void write_value(Bytes& data, const Value& value) {
-    encoding::u64(data, is_null(value));
+// Buffered exports, pages and streaming checkpoints share the wire layout.
+template <class Number, class Field>
+void emit_value(const Value& value, const Number& number, const Field& bytes_field) {
+    number(is_null(value));
     if (is_null(value))
         return;
     if (const auto* i = std::get_if<std::int64_t>(&value))
-        encoding::u64(data, std::bit_cast<std::uint64_t>(*i));
+        number(std::bit_cast<std::uint64_t>(*i));
     else if (const auto* d = std::get_if<double>(&value))
-        encoding::u64(data, std::bit_cast<std::uint64_t>(*d));
+        number(std::bit_cast<std::uint64_t>(*d));
     else if (const auto* s = std::get_if<std::string>(&value))
-        field(data, view(*s));
+        bytes_field(view(*s));
     else if (const auto* cell = std::get_if<Compact>(&value)) {
         if (cell->bytes().size() == 8) {
-            Bytes payload;
-            encoding::u64(payload, std::bit_cast<std::uint64_t>(i64_payload(value)));
-            field(data, payload);
+            number(8);
+            number(std::bit_cast<std::uint64_t>(i64_payload(value)));
         } else
-            field(data, cell->bytes());
+            bytes_field(cell->bytes());
     } else
-        field(data, std::get<Opaque>(value).bytes());
+        bytes_field(std::get<Opaque>(value).bytes());
+}
+void write_value(Bytes& data, const Value& value) {
+    emit_value(
+        value, [&](std::uint64_t n) { encoding::u64(data, n); }, [&](ByteView bytes) { field(data, bytes); });
 }
 Value read_value(Reader& reader, const Type& type, const Registry& registry, bool tagged) {
     if (tagged) {
@@ -356,19 +365,20 @@ Database Database::decode(ByteView bytes, Registry registry) {
     detail::validate_snapshot(bytes);
     Reader reader(bytes.first(bytes.size() - 8));
     auto format = string(reader);
-    if (format != magic && format != "CORESQL5" && format != "CORESQL4" && format != "CORESQL3" &&
-        format != "CORESQL2" && format != "CORESQL1")
+    if (format != magic && format != "CORESQL6" && format != "CORESQL5" && format != "CORESQL4" &&
+        format != "CORESQL3" && format != "CORESQL2" && format != "CORESQL1")
         throw Error(ErrorCode::format, "Unsupported snapshot format/version");
     Database database(std::move(registry));
     auto transaction = database.begin();
     auto tables = count(reader);
     std::map<std::string, TableConstraints> constraints;
-    const bool tagged = format == magic || format == "CORESQL5";
+    const bool tagged = format == magic || format == "CORESQL6" || format == "CORESQL5";
     const bool extended = tagged || format == "CORESQL4";
     for (std::size_t t = 0; t < tables; ++t) {
         auto name = string(reader);
         auto schema = read_schema(reader, database.owner_->registry, format != "CORESQL1",
-                                  format == "CORESQL3" || extended, extended, tagged, format == magic);
+                                  format == "CORESQL3" || extended, extended, tagged,
+                                  format == magic || format == "CORESQL6", format == magic);
         constraints.emplace(name, std::move(schema.constraints));
         const auto& columns = schema.columns;
         const auto ncolumns = columns.size();
@@ -424,7 +434,7 @@ std::size_t detail::checkpoint_size(const State& state) {
 Bytes detail::encode_changes(const State& base, const State& next) {
     checkpoint_size(next);
     Bytes data;
-    field(data, view("CORECHG7"));
+    field(data, view("CORECHG8"));
     std::size_t changed = 0;
     for (const auto& [name, table] : next.tables) {
         auto old = base.tables.find(name);
@@ -520,26 +530,7 @@ void detail::encode_checkpoint(const State& state, const std::function<void(Byte
         number(bytes.size());
         emit(bytes);
     };
-    auto value = [&](const Value& item) {
-        number(is_null(item));
-        if (is_null(item))
-            return;
-        if (const auto* i = std::get_if<std::int64_t>(&item))
-            number(std::bit_cast<std::uint64_t>(*i));
-        else if (const auto* d = std::get_if<double>(&item))
-            number(std::bit_cast<std::uint64_t>(*d));
-        else if (const auto* text = std::get_if<std::string>(&item))
-            bytes_field(view(*text));
-        else if (const auto* cell = std::get_if<Compact>(&item)) {
-            if (cell->bytes().size() == 8) {
-                number(8);
-                number(std::bit_cast<std::uint64_t>(i64_payload(item)));
-            } else
-                bytes_field(cell->bytes());
-        } else
-            bytes_field(std::get<Opaque>(item).bytes());
-    };
-    bytes_field(view("CORECHG7"));
+    bytes_field(view("CORECHG8"));
     number(state.tables.size());
     for (const auto& [name, table] : state.tables) {
         bytes_field(view(name));
@@ -556,7 +547,7 @@ void detail::encode_checkpoint(const State& state, const std::function<void(Byte
             for (std::size_t row = 0; row < chunk->rows.size(); ++row) {
                 number(static_cast<std::uint64_t>(chunk->rowids[row]));
                 for (const auto& item : chunk->rows[row])
-                    value(item);
+                    emit_value(item, number, bytes_field);
             }
         }
     }
@@ -572,9 +563,9 @@ detail::State detail::apply_changes(const State& base, ByteView bytes, const Reg
     Reader reader(bytes.first(bytes.size() - 8));
     auto format = string(reader);
     if (format != "CORECHG2" && format != "CORECHG3" && format != "CORECHG4" && format != "CORECHG5" &&
-        format != "CORECHG6" && format != "CORECHG7")
+        format != "CORECHG6" && format != "CORECHG7" && format != "CORECHG8")
         throw Error(ErrorCode::format, "Unsupported change record");
-    const bool tagged = format == "CORECHG6" || format == "CORECHG7";
+    const bool tagged = format == "CORECHG6" || format == "CORECHG7" || format == "CORECHG8";
     const bool extended = tagged || format == "CORECHG5";
     State next = base;
     std::set<std::string> seen;
@@ -589,7 +580,7 @@ detail::State detail::apply_changes(const State& base, ByteView bytes, const Reg
             *table = *old->second;
         auto declarations =
             read_schema(reader, registry, format != "CORECHG2", format == "CORECHG4" || extended, extended,
-                        tagged, format == "CORECHG7");
+                        tagged, format == "CORECHG7" || format == "CORECHG8", format == "CORECHG8");
         const auto columns = declarations.columns.size();
         if (old != base.tables.end()) {
             if (declarations.columns.size() < table->columns.size() ||

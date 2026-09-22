@@ -48,6 +48,28 @@ int main() {
         auto nested = db.query(q);
         CHECK(hashed.rows == nested.rows && hashed_trace == trace);
         CHECK(!trace.empty());
+        // Interleaved NULLs and duplicate keys preserve ON callback order for
+        // both the generic native buckets and the specialized i64 payload map.
+        for (const auto& type : {std::string("INTEGER"), std::string("TEXT")}) {
+            c.execute("CREATE TABLE ml(k " + type + ",id INTEGER)");
+            c.execute("CREATE TABLE mr(k " + type + ",id INTEGER)");
+            c.execute("INSERT INTO ml VALUES(1,1),(9,2),(NULL,3)");
+            c.execute("INSERT INTO mr VALUES(NULL,10),(1,11),(2,12),(NULL,13),(1,14),(NULL,15)");
+            q.table = "ml";
+            q.join->table = "mr";
+            q.join->on = all_of({eq, callback});
+            trace.clear();
+            auto actual = db.query(q);
+            auto observed = trace;
+            CHECK((observed ==
+                   std::vector<std::int64_t>{10, 11, 13, 14, 15, 10, 13, 15, 10, 11, 12, 13, 14, 15}));
+            q.join->on = all_of({not_(not_(eq)), callback});
+            trace.clear();
+            CHECK(db.query(q).rows == actual.rows);
+            CHECK(trace == observed);
+            c.execute("DROP TABLE ml");
+            c.execute("DROP TABLE mr");
+        }
         // Arbitrary equality overrides must keep their original nested execution.
         Registry custom(false);
         auto addon = registry.addon(text());

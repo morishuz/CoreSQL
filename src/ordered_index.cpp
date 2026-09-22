@@ -8,6 +8,8 @@ OrderedIndex::OrderedIndex(IndexDefinition d, const std::vector<Column>& schema,
     : definition(std::move(d)) {
     if (definition.name.empty() || definition.columns.empty())
         throw Error(ErrorCode::schema, "Index needs a name and columns");
+    if (definition.constraint_owned && !definition.unique)
+        throw Error(ErrorCode::schema, "Constraint-owned index must be unique");
     std::set<std::string> seen;
     for (const auto& name : definition.columns) {
         auto c =

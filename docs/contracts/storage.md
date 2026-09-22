@@ -163,12 +163,13 @@ is tested on macOS; Linux support is not yet exercised in this workspace.
 
 ## Formats and migration
 
-The live format is `CORELOG2`, writing `CORECHG7` change records with
+The live format is `CORELOG2`, writing `CORECHG8` change records with
 primary-key flags, index implementation IDs, named ordered-index definitions,
-column defaults, stable row identities, CHECK expressions and foreign keys.
-The reader also accepts existing `CORECHG2/3/4/5/6` records, including mixed old/new
-logs. Snapshot exports use `CORESQL6`; the reader still accepts
-`CORESQL1/2/3/4/5`. Older binaries reject the new formats. Background checkpointing
+column defaults, stable row identities, CHECK expressions, foreign keys and explicit
+constraint ownership on unique indexes.
+The reader also accepts existing `CORECHG2/3/4/5/6/7` records, including mixed old/new
+logs. Snapshot exports use `CORESQL7`; the reader still accepts
+`CORESQL1/2/3/4/5/6`. Older binaries reject the new formats. Background checkpointing
 uses the same records and framing. Recovery maps one record at a time for decoding,
 avoiding an additional anonymous buffer the size of a checkpoint. Final-state
 constraints and uniqueness are validated during open. Earlier
@@ -181,6 +182,14 @@ into a new persistent file; applications with custom types use
 `schema()` and copy rows through the public API when changing their schema. Adding a key requires a new table/database and
 validated row insertion; existing unkeyed schemas do not acquire constraints.
 Never overwrite or delete the original before verifying the migrated data.
+
+Constraint-owned unique indexes cannot be dropped independently, regardless of
+their display names. `CORESQL7`/`CORECHG8` record this ownership flag. When reading
+older formats, unique indexes named `sql.unique.*` are conservatively treated as
+constraint-owned: those files cannot distinguish SQL-generated constraints from
+core-created unique indexes with the same reserved prefix. New core indexes may
+use that prefix without acquiring constraint ownership. SQL still reserves it
+for its generated names.
 
 ## Tests
 
@@ -224,11 +233,12 @@ references never escape the query; returned values own their data. Recovery test
 cover clear interruptions before/after the commit marker, clear/reinsert, retained
 snapshots, and checkpoint/reopening.
 
+
 ## Extension index declarations
 
-New change records are `CORECHG7` and snapshot exports are `CORESQL6`, including
+New change records are `CORECHG8` and snapshot exports are `CORESQL7`, including
 column index implementation IDs, named ordered-index definitions, defaults and
-stable row identities. Readers retain `CORECHG2/3/4/5/6` and `CORESQL1/2/3/4/5`
+stable row identities. Readers retain `CORECHG2/3/4/5/6/7` and `CORESQL1/2/3/4/5/6`
 support. `CORELOG2` framing and the durability protocol are unchanged. Index
 structures generally rebuild from validated rows during open; registered types
 and index factories must be present. In paging mode, native INTEGER `core.hash`

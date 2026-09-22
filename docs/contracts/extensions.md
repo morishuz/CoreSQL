@@ -307,8 +307,8 @@ indexes after log replay, checking uniqueness before publishing the database.
 Paging mode can instead validate and reuse an optional native INTEGER primary-key
 lookup image; any changed durable log invalidates that cache. This does not add a
 persistence interface for custom providers. Missing type or index registrations
-fail opening. New records use `CORECHG7`; exports use `CORESQL6`. Previous
-`CORECHG2/3/4/5/6` and `CORESQL1/2/3/4/5` remain readable. `CORELOG2` framing is unchanged.
+fail opening. New records use `CORECHG8`; exports use `CORESQL7`. Previous
+`CORECHG2/3/4/5/6/7` and `CORESQL1/2/3/4/5/6` remain readable. `CORELOG2` framing is unchanged.
 
 The extension contract is a correctness obligation, not a sandbox: an index that
 mutates a shared snapshot, violates strong insertion guarantees or drops matching

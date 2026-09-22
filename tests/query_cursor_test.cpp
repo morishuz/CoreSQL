@@ -14,6 +14,32 @@ int main() {
         for (std::int64_t i = 0; i < 1000; ++i)
             sql.execute("INSERT INTO items VALUES(?, ?)", Row{i, std::string(128, 'x')});
         sql.execute("COMMIT");
+        // Cursor construction validates via the ordinary executor even at LIMIT 0.
+        // Test the core API: SQL rejects these aliases before reaching it.
+        for (bool multi : {false, true})
+            for (const auto& aliases :
+                 std::vector<std::pair<std::string, std::string>>{{"same", "same"}, {"", "b"}, {"a", ""}})
+                for (std::size_t limit : {std::size_t{0}, std::size_t{10}}) {
+                    Query invalid{"items", {column(aliases.first, "id")}};
+                    invalid.alias = aliases.first;
+                    invalid.limit = limit;
+                    Join join{"items", aliases.second, column(aliases.first, "id"),
+                              column(aliases.second, "id")};
+                    if (multi)
+                        invalid.joins.push_back(join);
+                    else
+                        invalid.join = join;
+                    expect(ErrorCode::schema, [&] { db.query(invalid); });
+                    expect(ErrorCode::schema, [&] { db.cursor(invalid); });
+                    std::size_t visited = 0;
+                    expect(ErrorCode::schema, [&] {
+                        db.query_each(invalid, [&](std::span<const Value>) {
+                            ++visited;
+                            return true;
+                        });
+                    });
+                    CHECK(visited == 0);
+                }
         Query q{"items", {column("id")}};
         detail::QueryCounters counters;
         auto cursor = db.cursor(q);

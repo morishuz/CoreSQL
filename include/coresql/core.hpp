@@ -402,6 +402,8 @@ struct IndexDefinition {
     std::vector<std::string> columns;
     bool unique = false;
     std::vector<bool> descending = {};
+    // Supports a table constraint; cannot be dropped independently. Requires unique.
+    bool constraint_owned = false;
     bool operator==(const IndexDefinition&) const = default;
 };
 using Schema = std::map<std::string, std::vector<Column>>;

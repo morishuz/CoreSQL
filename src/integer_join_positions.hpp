@@ -1,5 +1,6 @@
 #pragma once
 #include "state.hpp"
+#include "join_positions.hpp"
 #include "query_control.hpp"
 #include <unordered_map>
 
@@ -37,14 +38,7 @@ public:
 #endif
         auto found = buckets.find(key);
         static const std::vector<std::size_t> empty;
-        if (nulls.empty())
-            return found == buckets.end() ? empty : found->second;
-        merged = nulls;
-        if (found != buckets.end()) {
-            merged.insert(merged.end(), found->second.begin(), found->second.end());
-            std::sort(merged.begin(), merged.end());
-        }
-        return merged;
+        return merge_join_positions(found == buckets.end() ? empty : found->second, nulls, merged);
     }
 };
 } // namespace coresql::detail::execution

@@ -1,7 +1,8 @@
 #include "scan.hpp"
 
 namespace coresql::detail::execution {
-std::optional<Query> prepare_disjunctive_join(const Tables& tables, const Query& query) {
+std::optional<Query> prepare_disjunctive_join(const Tables& tables, const Query& query,
+                                              const Registry& registry) {
     if (!query.limit || query.join || query.joins.size() != 1 || query.source_where || !query.where ||
         query.where->kind != Predicate::Kind::any || query.where->children.size() < 2)
         return {};
@@ -31,7 +32,7 @@ std::optional<Query> prepare_disjunctive_join(const Tables& tables, const Query&
     // A FALSE leading key suppresses every branch. UNKNOWN does not: later
     // expressions may still run or fail. Retain the original path if either
     // snapshot contains a NULL key, even when the query is marked repeatable.
-    auto nonnull_integer = [&](const Expr& e) {
+    auto nonnull_native_i64 = [&](const Expr& e) {
         std::string name;
         if (e.qualifier == query.alias)
             name = query.table;
@@ -42,7 +43,7 @@ std::optional<Query> prepare_disjunctive_join(const Tables& tables, const Query&
         const auto& table = *require_table(tables, name);
         auto c = std::find_if(table.columns.begin(), table.columns.end(),
                               [&](const Column& column) { return column.name == e.name; });
-        if (c == table.columns.end() || c->type != integer())
+        if (c == table.columns.end() || !native_i64(registry.addon(c->type)))
             return false;
         const auto index = static_cast<std::size_t>(c - table.columns.begin());
         return visit_table_rows(table, [&](auto, const Row& row, auto) {
@@ -53,7 +54,7 @@ std::optional<Query> prepare_disjunctive_join(const Tables& tables, const Query&
             return !is_null(row[index]);
         });
     };
-    if (!nonnull_integer(key->left) || !nonnull_integer(key->right))
+    if (!nonnull_native_i64(key->left) || !nonnull_native_i64(key->right))
         return {};
     Query next = query;
     next.joins.front().cross = false;

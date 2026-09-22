@@ -83,7 +83,7 @@ Result execute(Transaction& tx, const Statement& s, const Registry& registry,
                 do {
                     name = "sql.unique.table." + std::to_string(suffix++);
                 } while (!index_names.insert(name).second);
-                keys.push_back({std::move(name), key.columns, true});
+                keys.push_back({std::move(name), key.columns, true, {}, true});
             }
         }
         tx.create_table(s.table, std::move(columns));
@@ -91,7 +91,7 @@ Result execute(Transaction& tx, const Statement& s, const Registry& registry,
             tx.create_index(s.table, std::move(key));
         for (const auto& f : s.fields)
             if (f.unique && !f.primary)
-                tx.create_index(s.table, {"sql.unique." + f.name, {f.name}, true});
+                tx.create_index(s.table, {"sql.unique." + f.name, {f.name}, true, {}, true});
         {
             const auto constraint_schema = tx.schema();
             Lowerer checks{constraint_schema, registry, {}, {{s.table, s.table}}};

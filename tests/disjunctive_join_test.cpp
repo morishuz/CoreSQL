@@ -2,6 +2,8 @@
 #include "../src/state.hpp"
 #include "coresql/sql.hpp"
 #include "coresql/decimal.hpp"
+#include "coresql/date.hpp"
+#include "coresql/timestamp.hpp"
 using namespace coresql;
 int main() {
     return tests([] {
@@ -16,6 +18,7 @@ int main() {
             "fail", [](std::span<const Type>) { return integer(); },
             [](std::span<const Value>) -> Value { throw Error(ErrorCode::constraint, "intentional"); }});
         sql::install(registry);
+        timestamps::install(registry);
         Database db(registry);
         sql::Connection c(db, registry);
         c.execute("CREATE TABLE a(k INTEGER,v INTEGER)");
@@ -96,6 +99,79 @@ int main() {
         auto revenue = c.execute(
             "SELECT sum(p*(1-d)) FROM prices,b WHERE (prices.k=b.k AND p>=50) OR (prices.k=b.k AND p>=100)");
         CHECK(decimals::format(revenue.rows[0][0]) == "170.0000");
+        // Compact i64 add-ons use the same rewrite as native integer keys.
+        for (const auto& type : {dates::type(), timestamps::type()}) {
+            auto tx = db.begin();
+            tx.create_table("typed_left", {{"k", type, false, {}, {}, true}});
+            tx.create_table("typed_right", {{"k", type, false, {}, {}, true}});
+            auto value = [&](std::int64_t n) {
+                return type == dates::type() ? dates::value(n) : timestamps::value(n);
+            };
+            for (auto n : {1, 1, 2, 3})
+                tx.insert("typed_left", {value(n)});
+            for (auto n : {1, 2, 2, 4})
+                tx.insert("typed_right", {value(n)});
+            tx.commit();
+            Query q{"typed_left", {column("a", "k"), column("b", "k")}};
+            q.alias = "a";
+            Join join{"typed_right", "b"};
+            join.cross = true;
+            q.joins = {join};
+            Predicate eq{column("a", "k"), Compare::equal, column("b", "k")};
+            q.where = any_of({eq, eq});
+            detail::QueryCounters counts;
+            Result result;
+            {
+                detail::QueryCounterScope scope(counts);
+                result = db.query(q);
+            }
+            q.where = not_(all_of({not_(eq), not_(eq)}));
+            CHECK(result.rows == db.query(q).rows);
+            CHECK(result.rows.size() == 4);
+            CHECK(counts.hash_build_rows == 4 && counts.candidate_pairs == 4);
+            auto add_null = db.begin();
+            add_null.insert("typed_right", {Null(type)});
+            add_null.commit();
+            q.where = any_of({eq, eq});
+            detail::QueryCounters nullable;
+            {
+                detail::QueryCounterScope scope(nullable);
+                CHECK(db.query(q).rows == result.rows);
+            }
+            CHECK(nullable.hash_build_rows == 0 && nullable.candidate_pairs == 20);
+            auto drop = db.begin();
+            drop.drop_table("typed_left");
+            drop.drop_table("typed_right");
+            drop.commit();
+        }
+        // An i64 layout alone does not promise native equality semantics.
+        Registry custom(false);
+        auto addon = registry.addon(integer());
+        addon.native_ops = false;
+        addon.equal = [](ByteView, const Value&, const Value&) { return true; };
+        addon.compare = [](ByteView, const Value&, const Value&) { return 0; };
+        addon.hash = [](ByteView, const Value&) { return std::size_t{0}; };
+        custom.add(addon);
+        Database other(custom);
+        auto tx = other.begin();
+        tx.create_table("a", {{"k", integer()}});
+        tx.create_table("b", {{"k", integer()}});
+        tx.insert("a", {std::int64_t{1}});
+        tx.insert("b", {std::int64_t{2}});
+        tx.commit();
+        Query query{"a", {column("a", "k"), column("b", "k")}};
+        query.alias = "a";
+        Join cross{"b", "b"};
+        cross.cross = true;
+        query.joins = {cross};
+        Predicate equality{column("a", "k"), Compare::equal, column("b", "k")};
+        query.where = any_of({equality, equality});
+        detail::QueryCounters fallback;
+        {
+            detail::QueryCounterScope scope(fallback);
+            CHECK(other.query(query).rows.size() == 1);
+        }
+        CHECK(fallback.hash_build_rows == 0 && fallback.candidate_pairs == 1);
         detail::QueryCounters nested, outer;
         {
             detail::QueryCounterScope scope(outer);
