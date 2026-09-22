@@ -155,7 +155,8 @@ void validate_replacement_constraints(const Tables& tables, const std::string& n
             const auto before = original.chunks.find(id);
             if (before != original.chunks.end() && before->second == chunk)
                 continue;
-            for (const auto& row : chunk->rows)
+            const auto pin = chunk.pin();
+            for (const auto& row : pin->rows)
                 validate(row);
         }
     };

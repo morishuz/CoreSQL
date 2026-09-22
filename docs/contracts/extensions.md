@@ -11,7 +11,7 @@ type is absent. Database construction copies the registry and freezes its contra
 | Member | Responsibility |
 | --- | --- |
 | `id`, `version` | Stable identity; change version when encoding or semantics change |
-| `layout` | Closed cell shape: `i64`, `f64`, `text`, or `bytes`. Identity is open; a type chooses one layout |
+| `layout` | Closed cell shape: `i64`, `i128`, `f64`, `text`, or `bytes`. Identity is open; a type chooses one layout |
 | `validate_type(parameters)` | Check an instance, such as a vector's fixed dimension |
 | `validate_value(parameters, value)` | Check a value entering the engine |
 | `equal(parameters, a, b)` | Optional equality |
@@ -73,14 +73,40 @@ candidate expressions retain the normal path. SQL's implementation uses `native_
 truth results, and only when affinity leaves the bound key type unchanged. Small
 lists use direct comparisons; larger sets use hash lookup.
 
-Callbacks are trusted application code, deterministic, non-reentrant and free
-of database mutations. Captured resources must outlive their use, typically via
-shared ownership. This is a C++ source interface, not a stable shared-library ABI.
+Callbacks are trusted application code, deterministic and free of database
+mutations. They must not reenter active database operations. Captured resources
+must outlive their use, typically via shared ownership. This is a C++ source
+interface, not a stable shared-library ABI.
+
+## Concurrent callback use
+
+`OpenOptions::concurrent_reads` defaults to false. Enabling it is an application
+promise that the installed type, function, aggregate, extractor, index and SQL
+adapter callbacks support concurrent invocation on independent execution state.
+The bundled providers meet this contract. `Database::snapshot()` and
+`checkpoint_async()` require the opt-in; a registry copy alone does not make an
+extension thread-safe because copied callbacks may share captured resources.
+
+Validation, inference, preparation and execution can overlap on reader threads and
+the writer. A published index can receive concurrent `lookup`, `search`, `validate`
+and `clone` calls. Const methods must not update an unsynchronized lazy cache or
+shared scratch buffer. Mutations affect independent cloned index state; any internal
+copy-on-write sharing must keep older snapshots immutable. Each aggregate factory
+must return independent query state; a single aggregate-state instance is not
+invoked concurrently by the engine. SQL adapter configuration stays immutable,
+but adapter callbacks and captured resources need the same concurrency discipline.
+
+Use immutable captures, query-local state or explicit synchronization for shared
+resources. `native_ops`, `repeatable` and `reorder_comparisons` certify semantics,
+not thread safety. Test custom providers with concurrent reads, writes, retained
+snapshots and checkpoints under ThreadSanitizer before opting in. A mutable
+transaction, SQL connection or cursor still needs one caller at a time; the opt-in
+does not make those objects independently shareable between active calls.
 
 ## SQL type adapters
 
 `coresql/sql_types.hpp` adds an optional SQL policy layer over `TypeAddon`.
-DATE, DECIMAL and VECTOR use this interface: each has `type.cpp` for its independent
+BLOB, DATE, DECIMAL and VECTOR use this interface: each has `type.cpp` for its independent
 backend implementation and `sql.cpp` for its SQL adapter under `addons/<type>/`.
 The SQL library compiles the adapters; backend-only users still link the domain
 library without SQL. Integer, real and text use the same adapter interface, with
@@ -111,7 +137,7 @@ statement prepared with a different snapshot is rejected. `TypeAdapters{}` suppl
 scalar SQL adapters; `TypeAdapters(false)` starts
 without type adapters for explicit composition using `integer_adapter()`,
 `real_adapter()` and `text_adapter()`. `default_type_adapters()` also supplies
-DATE, DECIMAL and VECTOR. Scalar SQL adapters expect the registry's normal backend
+BLOB, DATE, DECIMAL and VECTOR. Scalar SQL adapters expect the registry's normal backend
 scalar types/functions; they do not reinstall them. Domain installation invokes
 each adapter's backend installer, so do not also install those domains separately.
 Shared SQL scalar expression rules remain available even with an empty adapter set.
@@ -275,12 +301,14 @@ small slot-to-position map; untouched chunks and unindexed tables need no per-ro
 slot metadata. Slot maps and index entries are rebuilt from loaded rows, so this
 change adds no persistent row identifier or file-format version.
 
-Index IDs, type identities/parameters, and rows are persisted. Internal index
-structures and callback pointers are not persisted. Open rebuilds indexes after
-log replay, checking uniqueness before publishing the database. Missing type or
-index registrations fail opening. New records use `CORECHG6`; exports use
-`CORESQL5`. Previous `CORECHG2/3/4/5` and `CORESQL1/2/3/4` remain readable. New files need
-this version to read their index declarations. `CORELOG2` framing is unchanged.
+Index IDs, type identities/parameters, and rows are persisted. Extension callback
+pointers and custom index structures are not persisted. Open generally rebuilds
+indexes after log replay, checking uniqueness before publishing the database.
+Paging mode can instead validate and reuse an optional native INTEGER primary-key
+lookup image; any changed durable log invalidates that cache. This does not add a
+persistence interface for custom providers. Missing type or index registrations
+fail opening. New records use `CORECHG7`; exports use `CORESQL6`. Previous
+`CORECHG2/3/4/5/6` and `CORESQL1/2/3/4/5` remain readable. `CORELOG2` framing is unchanged.
 
 The extension contract is a correctness obligation, not a sandbox: an index that
 mutates a shared snapshot, violates strong insertion guarantees or drops matching
@@ -290,7 +318,9 @@ tested against the same obligations.
 
 This provides building blocks for vector, spatial, JSON or text indexes. It does
 not yet provide text tokenization, JSON path planning, native graph query operators, time-series
-compression, vector ANN search, a cost-based optimizer or disk-resident indexes.
+compression, vector ANN search, a cost-based optimizer or general disk-resident
+extension indexes. The native paging backend and its INTEGER primary-key images
+are described in the [storage contract](storage.md).
 
 ## Extracted keys
 

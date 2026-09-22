@@ -1,5 +1,6 @@
 #pragma once
 #include "state.hpp"
+#include "query_control.hpp"
 #include <unordered_map>
 
 namespace coresql::detail::execution {
@@ -7,6 +8,7 @@ namespace coresql::detail::execution {
 // NULL keys, since UNKNOWN must still evaluate the rest of ON. Positions retain
 // source order and let outer joins track actual matches independently of WHERE.
 class IntegerJoinPositions {
+    QueryBuffer memory_;
     bool built = false;
     std::unordered_map<std::int64_t, std::vector<std::size_t>> buckets;
     std::vector<std::size_t> nulls, merged;
@@ -16,6 +18,7 @@ public:
                                          std::int64_t key) {
         if (!built) {
             for (std::size_t i = 0; i < rows.size(); ++i) {
+                memory_.add(sizeof(std::size_t) + 96);
                 const auto& value = (*rows[i])[column];
                 if (is_null(value))
                     nulls.push_back(i);

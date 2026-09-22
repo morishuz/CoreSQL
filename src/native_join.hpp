@@ -25,6 +25,7 @@ template <class Position> class NativeJoinBuckets {
         bool operator()(const Value* a, const Value* b) const { return addon->equal(parameters, *a, *b); }
     };
     using Map = std::unordered_map<const Value*, std::vector<Position>, Hash, Equal>;
+    QueryBuffer memory_;
     std::optional<Map> buckets;
 
 public:
@@ -33,7 +34,10 @@ public:
         const auto* addon = &registry.addon(type);
         buckets.emplace(0, Hash{addon, type.parameters}, Equal{addon, type.parameters});
     }
-    void add(const Value& key, Position position) { (*buckets)[&key].push_back(position); }
+    void add(const Value& key, Position position) {
+        memory_.add(sizeof(Position) + 96);
+        (*buckets)[&key].push_back(position);
+    }
     const std::vector<Position>& find(const Value& key) const {
         static const std::vector<Position> empty;
         const auto found = buckets->find(&key);
@@ -43,6 +47,7 @@ public:
 class NativeJoinLookup {
     IntegerJoinLookup integers;
     NativeJoinBuckets<const Row*> keys;
+    std::vector<std::shared_ptr<Chunk>> pins;
 
 public:
     const std::vector<const Row*>& find(const Table& table, std::size_t column, const Value& key,
@@ -51,6 +56,7 @@ public:
             return integers.find(table, column, i64_payload(key));
         if (!keys.built()) {
             keys.create(registry, type);
+            pins = pin_table(table);
             visit_table_rows(table, [&](auto, const Row& row, auto) {
 #ifdef CORESQL_TESTING
                 if (auto* counters = active_query_counters)

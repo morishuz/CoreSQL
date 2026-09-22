@@ -88,11 +88,37 @@ This verifies 4,096 writes and 8,192 exact searches per phase using the same
 100,000-row map. Each round submits eight single-observation writes followed by
 16 reads, then resolves every future before the next round. Phases compare
 unbatched/explicit maintenance, batched/explicit maintenance, immediate periodic
-checkpoints, and idle-deferred periodic checkpoints. All phases retain synchronized
-commits. Explicit-maintenance phases can still encounter core log-size checkpoints.
+checkpoints, idle-deferred periodic checkpoints, background checkpoints with two
+snapshot readers, and the same background configuration with a 16 MiB page cache.
+The four original controls use serial reads and resident rows. All phases retain
+synchronized commits. Explicit-maintenance and background phases can still
+encounter synchronous core log-size checkpoints.
 The CSV contains raw queue, execution, shared commit and total latency samples;
 report sample counts and p50/p95/p99/max separately by phase/operation. Idle
 checkpoint records have zero request total: use their execution time. Final state
 and reopening are checked. Preparation, seed loading, startup and orderly shutdown
 are outside these request samples. This closed-loop synthetic workload has no
 external sensor arrival model and does not establish worst-case latency.
+
+
+## Paged working sets
+
+`coresql_paging_profile [rows=20000] [cache_mib=1] [payload_bytes=4096]`
+loads bounded 256-row durable batches, checkpoints, reopens twice, streams every
+row with content checks and performs 2,000 deterministic indexed lookups per open.
+Run each configuration in a separate process, with builds and other benchmarks
+idle, so peak RSS remains comparable:
+
+```sh
+./build/release/coresql_paging_profile 20000 0 > resident.csv
+./build/release/coresql_paging_profile 20000 1 > paged.csv
+```
+
+Zero selects the resident backend. The default paged configuration has about
+78 MiB of logical payload and a 1 MiB decoded-row cache. CSV includes stage wall
+time, process peak RSS, cache resident/pinned bytes, page I/O counts and scratch
+backing bytes. OS page cache state affects I/O timing; this is a component workload,
+not a broad database ranking. The first paged reopen creates a persisted INTEGER
+primary lookup cache; the second can reuse it. Both still validate durable rows.
+The cache target excludes dirty transaction state, indexes, mapped pages and other
+query/allocator memory; inspect RSS alongside cache counters.

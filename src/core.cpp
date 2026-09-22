@@ -1,5 +1,6 @@
 #include "storage.hpp"
 #include "query.hpp"
+#include "pager.hpp"
 
 namespace coresql {
 namespace {
@@ -51,8 +52,8 @@ void detail::refresh(Table& table) {
     table.row_count = table.payload_bytes = 0;
     for (const auto& [id, chunk] : table.chunks) {
         (void)id;
-        table.row_count += chunk->rows.size();
-        table.payload_bytes += chunk->payload_bytes;
+        table.row_count += chunk.rows();
+        table.payload_bytes += chunk.payload_bytes();
     }
 }
 Stats detail::measure(const State& state) {
@@ -68,9 +69,10 @@ Stats detail::measure(const State& state) {
     return result;
 }
 
-Database::Database(Registry registry)
-    : owner_(std::make_shared<detail::Owner>(
-          detail::Owner{std::move(registry), std::make_shared<const detail::State>(), {}})) {
+Database::Database(Registry registry, OpenOptions options)
+    : owner_(std::make_shared<detail::Owner>(std::move(registry), options)) {
+    if (options.page_cache_bytes)
+        owner_->pager = std::make_shared<detail::Pager>(options.page_cache_bytes, owner_->registry);
 }
 Database::~Database() = default;
 Database::Database(Database&&) noexcept = default;
@@ -86,11 +88,23 @@ StorageStats Database::storage_stats() const {
         return {};
     return {owner_->storage->bytes_written, owner_->storage->checkpoints};
 }
+CacheStats Database::cache_stats() const {
+    detail::healthy(owner_);
+    return owner_->pager ? owner_->pager->stats() : CacheStats{};
+}
+void Database::trim_cache() {
+    detail::healthy(owner_);
+    if (owner_->pager)
+        owner_->pager->trim();
+}
 void Database::checkpoint() {
+    if (!owner_)
+        fail(ErrorCode::state, "Database is closed");
+    std::lock_guard lock(owner_->commit_mutex);
     detail::healthy(owner_);
     if (!owner_->storage)
         fail(ErrorCode::state, "Checkpoint requires persistent storage");
-    owner_->storage->checkpoint(*owner_->current);
+    owner_->storage->checkpoint(*owner_->capture());
 }
 Transaction Database::begin() {
     detail::healthy(owner_);
@@ -102,7 +116,7 @@ Result Database::query(const Query& query) const {
 Result Database::query(const Query& query, const QueryOptions& options) const {
     detail::healthy(owner_);
     detail::execution::QueryControl control(options);
-    auto snapshot = owner_->current;
+    auto snapshot = owner_->capture();
     auto result = detail::execution::run(snapshot->tables, query, owner_->registry);
     control.check();
     return result;
@@ -111,18 +125,18 @@ StreamResult Database::query_each(const Query& query, const RowVisitor& visit,
                                   const QueryOptions& options) const {
     detail::healthy(owner_);
     detail::execution::QueryControl control(options);
-    auto snapshot = owner_->current;
+    auto snapshot = owner_->capture();
     auto result = detail::execution::stream(snapshot->tables, query, owner_->registry, visit);
     control.check();
     return result;
 }
 Stats Database::stats() const {
     detail::healthy(owner_);
-    return owner_->current->stats;
+    return owner_->capture()->stats;
 }
 Schema Database::schema() const {
     detail::healthy(owner_);
-    return describe(owner_->current->tables);
+    return describe(owner_->capture()->tables);
 }
 
 Result Transaction::query(const Query& query) const {

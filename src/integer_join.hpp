@@ -8,7 +8,9 @@ namespace coresql::detail::execution {
 // Bucket insertion order preserves the nested-loop order for duplicate keys.
 class IntegerJoinLookup {
     using Buckets = std::unordered_map<std::int64_t, std::vector<const Row*>>;
+    QueryBuffer memory_;
     std::optional<Buckets> buckets;
+    std::vector<std::shared_ptr<Chunk>> pins;
     // A bounded negative filter avoids hash-table probes for sparse key sets.
     // Collisions always fall through to the exact lookup.
     std::array<std::uint64_t, 4> presence{};
@@ -19,13 +21,16 @@ public:
     const std::vector<const Row*>& find(const Table& table, std::size_t column, std::int64_t key) {
         if (!buckets) {
             buckets.emplace();
+            pins = pin_table(table);
             visit_table_rows(table, [&](auto, const Row& row, auto) {
 #ifdef CORESQL_TESTING
                 if (auto* counters = active_query_counters)
                     ++counters->hash_build_rows;
 #endif
-                if (!is_null(row[column]))
+                if (!is_null(row[column])) {
+                    memory_.add(sizeof(const Row*) + 96);
                     (*buckets)[i64_payload(row[column])].push_back(&row);
+                }
                 return true;
             });
             selective = buckets->size() <= 128;

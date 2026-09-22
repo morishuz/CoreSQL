@@ -26,6 +26,9 @@ struct WorkerLimits {
     std::chrono::microseconds batch_wait{500}; // 0..10000, measured from first acceptance.
     std::size_t checkpoint_every = 256;        // Successful mutation requests; zero means explicit only.
     std::chrono::milliseconds checkpoint_max_delay{1000};
+    std::size_t reader_threads = 2; // 0..4; zero retains serial execution.
+    std::size_t page_cache_bytes = 64 * 1024 * 1024;
+    bool background_checkpoints = true;
 };
 struct LatencySample {
     enum Kind { ingest, search, erase, checkpoint } kind;
@@ -42,7 +45,7 @@ struct WorkerStats {
     // Most recent 4096 completed operations, including explicit/idle checkpoints.
     std::vector<LatencySample> samples;
 };
-// Application example: exactly one thread owns the database and SQL connection.
+// One owner thread serializes writes; bounded reader threads execute committed snapshots.
 // Accepted writes are acknowledged only after synchronized commit. Destruction
 // drains accepted work and joins; it is not a deadline-bounded shutdown operation.
 class Worker {

@@ -20,6 +20,7 @@ public:
 
 private:
     friend class Connection;
+    friend class ReadConnection;
     std::shared_ptr<const detail::Statement> parsed_;
     TypeAdapters adapters_;
 };
@@ -30,6 +31,36 @@ struct Result {
     std::vector<Row> rows;
     std::size_t changes = 0;
     std::vector<std::string> columns = {};
+};
+class Cursor {
+public:
+    Cursor(QueryCursor, std::vector<std::string> columns);
+    Cursor(Cursor&&) noexcept = default;
+    Cursor& operator=(Cursor&&) noexcept = default;
+    const std::vector<std::string>& columns() const { return columns_; }
+    std::optional<Row> next();
+    Result fetch(std::size_t max_rows);
+    CursorStats stats() const { return cursor_.stats(); }
+    void close() noexcept { cursor_.close(); }
+
+private:
+    QueryCursor cursor_;
+    std::vector<std::string> columns_;
+};
+// Read-only SQL over a retained committed snapshot. Distinct connections may run
+// on separate reader threads; a cursor retains the same snapshot independently.
+class ReadConnection {
+public:
+    explicit ReadConnection(ReadSnapshot, const TypeAdapters& = default_type_adapters());
+    Result query(const Statement&, std::span<const Value> = {}, const QueryOptions& = {}) const;
+    Cursor cursor(const Statement&, std::span<const Value> = {}, const QueryOptions& = {}) const;
+    std::vector<std::string> query_each(const Statement&, const RowVisitor&, std::span<const Value> = {},
+                                        const QueryOptions& = {}) const;
+
+private:
+    ReadSnapshot snapshot_;
+    TypeAdapters adapters_;
+    Query prepare(const Statement&, std::span<const Value>, std::vector<std::string>&) const;
 };
 class Connection {
 public:
@@ -43,7 +74,8 @@ public:
     Result execute(std::string_view, std::span<const Value> parameters = {});
     // Controlled SELECT execution; mutations/transaction commands are rejected.
     Result query(const Statement&, std::span<const Value> parameters = {}, const QueryOptions& = {});
-    // Streaming SELECT follows the core's bounded single-table scan contract.
+    Cursor cursor(const Statement&, std::span<const Value> parameters = {}, const QueryOptions& = {});
+    // Streaming SELECT follows the core cursor contract, including UNION ALL and one join.
     // Returns output column names. Each unpacked row is borrowed during the visitor.
     std::vector<std::string> query_each(const Statement&, const RowVisitor&,
                                         std::span<const Value> parameters = {}, const QueryOptions& = {});

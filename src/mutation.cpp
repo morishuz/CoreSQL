@@ -27,9 +27,9 @@ void Transaction::insert_impl(const std::string& name, Row row, std::optional<st
     detail::refresh(added);
     const auto bytes = added.payload_bytes;
     const bool new_chunk =
-        table.chunks.empty() || table.chunks.rbegin()->second->rows.size() >= detail::chunk_rows ||
-        table.chunks.rbegin()->second->next_slot() > std::numeric_limits<std::uint32_t>::max() ||
-        table.chunks.rbegin()->second->encoded_bytes + added.encoded_bytes > detail::chunk_bytes;
+        table.chunks.empty() || table.chunks.rbegin()->second.rows() >= detail::chunk_rows ||
+        table.chunks.rbegin()->second.pin()->next_slot() > std::numeric_limits<std::uint32_t>::max() ||
+        table.chunks.rbegin()->second.encoded_bytes() + added.encoded_bytes > detail::chunk_bytes;
     if (new_chunk && table.next_chunk == std::numeric_limits<std::uint64_t>::max())
         fail(ErrorCode::state, "Chunk identifier space exhausted");
     // Finish every potentially throwing row allocation before touching the
@@ -42,9 +42,7 @@ void Transaction::insert_impl(const std::string& name, Row row, std::optional<st
         prepared->rows.reserve(1);
     } else {
         auto& chunk = table.chunks.rbegin()->second;
-        if (chunk.use_count() != 1)
-            chunk = std::make_shared<detail::Chunk>(*chunk);
-        prepared = chunk;
+        prepared = chunk.writable();
         if (prepared->rows.size() == prepared->rows.capacity())
             prepared->rows.reserve(std::max(std::size_t{1}, prepared->rows.size() * 2));
     }

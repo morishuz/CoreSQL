@@ -51,17 +51,17 @@ void Transaction::vacuum() {
         (void)name;
         auto table = std::make_shared<detail::Table>(*stored);
         table->chunks = {};
-        for (const auto& [id, chunk] : stored->chunks) {
+        for (const auto& [id, reference] : stored->chunks) {
+            const auto chunk = reference.pin();
             (void)id;
             for (std::size_t i = 0; i < chunk->rows.size(); ++i) {
-                if (table->chunks.empty() ||
-                    table->chunks.rbegin()->second->rows.size() >= detail::chunk_rows ||
-                    table->chunks.rbegin()->second->encoded_bytes >= detail::chunk_bytes) {
+                if (table->chunks.empty() || table->chunks.rbegin()->second.rows() >= detail::chunk_rows ||
+                    table->chunks.rbegin()->second.encoded_bytes() >= detail::chunk_bytes) {
                     if (table->next_chunk == UINT64_MAX)
                         fail(ErrorCode::state, "Chunk identity exhausted");
                     table->chunks.emplace(table->next_chunk++, std::make_shared<detail::Chunk>());
                 }
-                auto& out = *table->chunks.rbegin()->second;
+                auto& out = *table->chunks.rbegin()->second.writable();
                 out.rows.push_back(chunk->rows[i]);
                 out.rowids.push_back(chunk->rowids[i]);
                 detail::refresh(out);
@@ -83,7 +83,8 @@ void Transaction::integrity_check() const {
         for (const auto& index : table->ordered)
             if (index->validate() != table->row_count)
                 fail(ErrorCode::state, "Ordered index cardinality mismatch");
-        for (const auto& [id, chunk] : table->chunks) {
+        for (const auto& [id, reference] : table->chunks) {
+            const auto chunk = reference.pin();
             if (id >= table->next_chunk || chunk->rows.size() != chunk->rowids.size())
                 fail(ErrorCode::state, "Invalid chunk metadata");
             auto measured = *chunk;
@@ -112,9 +113,11 @@ void Transaction::integrity_check() const {
         auto validate_index = [&](const detail::IndexBinding& index) {
             std::vector<IndexEntry> source;
             source.reserve(rows);
-            for (const auto& [id, chunk] : table->chunks)
+            for (const auto& [id, reference] : table->chunks) {
+                const auto chunk = reference.pin();
                 for (std::size_t i = 0; i < chunk->rows.size(); ++i)
                     source.push_back({chunk->rows[i][index.column], {id, chunk->slot(i)}});
+            }
             index.data->validate(source);
         };
         if (table->primary)
@@ -132,7 +135,8 @@ std::map<std::string, std::size_t> Transaction::analyze() const {
         result[name + ".rows"] = table->row_count;
         for (const auto& index : table->ordered) {
             std::set<Row, detail::RowLess> keys(detail::RowLess{&owner->registry});
-            for (const auto& [id, chunk] : table->chunks) {
+            for (const auto& [id, reference] : table->chunks) {
+                const auto chunk = reference.pin();
                 (void)id;
                 for (const auto& row : chunk->rows)
                     keys.insert(index->key(row));
@@ -150,9 +154,11 @@ void Transaction::create_index(const std::string& name, IndexDefinition definiti
             fail(ErrorCode::schema, "Index already exists");
     auto replacement = std::make_shared<detail::Table>(*stored);
     auto index = std::make_shared<detail::OrderedIndex>(definition, stored->columns, owner->registry);
-    for (const auto& [id, chunk] : stored->chunks)
+    for (const auto& [id, reference] : stored->chunks) {
+        const auto chunk = reference.pin();
         for (std::size_t i = 0; i < chunk->rows.size(); ++i)
             index->insert(chunk->rows[i], {id, chunk->slot(i)});
+    }
     replacement->index_definitions.push_back(std::move(definition));
     replacement->ordered.push_back(std::move(index));
     stored = std::move(replacement);
@@ -169,7 +175,8 @@ void Transaction::add_column(const std::string& name, Column column) {
     detail::validate_stored(*column.default_value, column, owner->registry);
     auto replacement = std::make_shared<detail::Table>(*stored);
     replacement->columns.push_back(column);
-    for (const auto& [id, chunk] : stored->chunks) {
+    for (const auto& [id, reference] : stored->chunks) {
+        const auto chunk = reference.pin();
         auto edited = std::make_shared<detail::Chunk>(*chunk);
         for (auto& row : edited->rows)
             row.push_back(*column.default_value);

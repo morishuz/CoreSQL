@@ -2,14 +2,20 @@
 #include "bound.hpp"
 
 namespace coresql::detail::execution {
-inline const Row& indexed_row(const detail::Table& table, RowLocation location) {
+struct PinnedRow {
+    std::shared_ptr<Chunk> chunk;
+    std::size_t position;
+    operator const Row&() const { return chunk->rows[position]; }
+};
+inline PinnedRow indexed_row(const detail::Table& table, RowLocation location) {
     auto found = table.chunks.find(location.chunk);
     if (found == table.chunks.end())
         fail(ErrorCode::state, "Index returned a missing chunk");
-    auto position = found->second->position(location.slot);
-    if (position == found->second->rows.size())
+    auto pinned = found->second.pin();
+    auto position = pinned->position(location.slot);
+    if (position == pinned->rows.size())
         fail(ErrorCode::state, "Index returned a missing row");
-    return found->second->rows[position];
+    return {std::move(pinned), position};
 }
 using RowSelection = std::optional<std::span<const RowLocation>>;
 // Sorted locations preserve scan order and let us fetch each selected chunk once.
@@ -17,7 +23,8 @@ using RowSelection = std::optional<std::span<const RowLocation>>;
 template <class F>
 void visit_chunks(const detail::Table& table, const std::optional<IndexResult>& selected, F&& visit) {
     if (!selected && !table.selection) {
-        for (const auto& [id, chunk] : table.chunks) {
+        for (const auto& [id, reference] : table.chunks) {
+            const auto chunk = reference.pin();
 #ifdef CORESQL_TESTING
             ++detail::visited_chunks();
 #endif
@@ -40,14 +47,15 @@ void visit_chunks(const detail::Table& table, const std::optional<IndexResult>& 
             auto chunk = table.chunks.find(rows[first].chunk);
             if (chunk == table.chunks.end())
                 fail(ErrorCode::state, "Index returned a missing chunk");
+            auto pinned = chunk->second.pin();
             auto group = rows.subspan(first, last - first);
             for (auto location : group)
-                if (chunk->second->position(location.slot) == chunk->second->rows.size())
+                if (pinned->position(location.slot) == pinned->rows.size())
                     fail(ErrorCode::state, "Index returned a missing row");
 #ifdef CORESQL_TESTING
             ++detail::visited_chunks();
 #endif
-            if (!visit(chunk->first, chunk->second, RowSelection{group}))
+            if (!visit(chunk->first, pinned, RowSelection{group}))
                 break;
             first = last;
         }
@@ -76,11 +84,27 @@ template <class F> bool visit_table_rows(const detail::Table& table, F&& visit) 
     bool more = true;
     visit_chunks(table, {}, [&](auto id, const auto& chunk, RowSelection rows) {
         more = visit_rows(*chunk, rows, [&](auto position, const Row& row) {
-            return visit(RowLocation{id, chunk->slot(position)}, row, chunk->rowids[position]);
+            if constexpr (std::is_invocable_v<F, RowLocation, const Row&, std::int64_t,
+                                              const std::shared_ptr<Chunk>&>)
+                return visit(RowLocation{id, chunk->slot(position)}, row, chunk->rowids[position], chunk);
+            else
+                return visit(RowLocation{id, chunk->slot(position)}, row, chunk->rowids[position]);
         });
         return more;
     });
     return more;
 }
 
+// Materialized hash joins retain borrowed row pointers beyond scan callbacks.
+// Their input pages remain explicitly pinned for the operator lifetime; these
+// query intermediates can exceed the clean-cache target and are reported as pins.
+inline std::vector<std::shared_ptr<Chunk>> pin_table(const Table& table) {
+    std::vector<std::shared_ptr<Chunk>> pins;
+    pins.reserve(table.chunks.size());
+    for (const auto& [id, chunk] : table.chunks) {
+        (void)id;
+        pins.push_back(chunk.pin());
+    }
+    return pins;
+}
 } // namespace coresql::detail::execution

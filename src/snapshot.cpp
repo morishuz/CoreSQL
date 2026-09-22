@@ -2,6 +2,7 @@
 #include "coresql/encoding.hpp"
 #include "storage.hpp"
 #include "index.hpp"
+#include "pager.hpp"
 
 #include <array>
 #include <bit>
@@ -285,8 +286,9 @@ Bytes detail::encode(const detail::State& state) {
         write_schema(data, table);
         encoding::u64(data, static_cast<std::uint64_t>(table.next_rowid));
         encoding::u64(data, table.row_count);
-        for (const auto& [id, chunk] : table.chunks) {
+        for (const auto& [id, reference] : table.chunks) {
             (void)id;
+            const auto chunk = reference.pin();
             for (std::size_t i = 0; i < chunk->rows.size(); ++i) {
                 encoding::u64(data, static_cast<std::uint64_t>(chunk->rowids[i]));
                 for (const auto& value : chunk->rows[i])
@@ -304,7 +306,7 @@ Bytes detail::encode(const detail::State& state) {
 
 void Database::save(const std::filesystem::path& path) const {
     detail::healthy(owner_);
-    auto data = detail::encode(*owner_->current);
+    auto data = detail::encode(*owner_->capture());
     // Exclusive creation avoids replacing an existing database/export by mistake.
     int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
     if (fd < 0)
@@ -412,7 +414,7 @@ std::size_t detail::checkpoint_size(const State& state) {
         bytes += schema.size();
         for (const auto& [id, chunk] : table->chunks) {
             (void)id;
-            bytes += 16 + chunk->encoded_bytes;
+            bytes += 16 + chunk.encoded_bytes();
         }
         if (bytes > max_snapshot)
             throw Error(ErrorCode::format, "Live encoded state exceeds configured encoded-size limit");
@@ -456,11 +458,12 @@ Bytes detail::encode_changes(const State& base, const State& next) {
             auto before = previous.chunks.find(id);
             if (before != previous.chunks.end() && before->second == chunk)
                 continue;
+            const auto pinned = chunk.pin();
             encoding::u64(data, id);
-            encoding::u64(data, chunk->rows.size());
-            for (std::size_t i = 0; i < chunk->rows.size(); ++i) {
-                encoding::u64(data, static_cast<std::uint64_t>(chunk->rowids[i]));
-                for (const auto& value : chunk->rows[i])
+            encoding::u64(data, pinned->rows.size());
+            for (std::size_t i = 0; i < pinned->rows.size(); ++i) {
+                encoding::u64(data, static_cast<std::uint64_t>(pinned->rowids[i]));
+                for (const auto& value : pinned->rows[i])
                     write_value(data, value);
             }
         }
@@ -477,7 +480,94 @@ Bytes detail::encode_changes(const State& base, const State& next) {
     encoding::u64(data, checksum(data));
     return data;
 }
-detail::State detail::apply_changes(const State& base, ByteView bytes, const Registry& registry) {
+// Checkpoints can be much larger than the working page cache. Encode scalars into
+// a small buffer and pass large value payloads directly to the file sink. Only a
+// table's schema is temporarily materialized; rows and chunks are never copied.
+void detail::encode_checkpoint(const State& state, const std::function<void(ByteView)>& sink) {
+    checkpoint_size(state);
+    std::uint64_t hash = 14695981039346656037ULL;
+    std::size_t size = 0;
+    Bytes buffer;
+    buffer.reserve(64 * 1024);
+    auto flush = [&] {
+        if (!buffer.empty()) {
+            sink(buffer);
+            buffer.clear();
+        }
+    };
+    auto emit = [&](ByteView bytes) {
+        if (bytes.size() > max_snapshot - 8 || size > max_snapshot - 8 - bytes.size())
+            throw Error(ErrorCode::format, "Checkpoint exceeds configured encoded-size limit");
+        size += bytes.size();
+        for (auto byte : bytes) {
+            hash ^= std::to_integer<unsigned>(byte);
+            hash *= 1099511628211ULL;
+        }
+        if (buffer.size() + bytes.size() > 64 * 1024)
+            flush();
+        if (bytes.size() >= 64 * 1024)
+            sink(bytes);
+        else
+            buffer.insert(buffer.end(), bytes.begin(), bytes.end());
+    };
+    auto number = [&](std::uint64_t value) {
+        std::array<std::byte, 8> bytes{};
+        for (unsigned i = 0; i < 8; ++i)
+            bytes[i] = std::byte((value >> (8 * i)) & 255);
+        emit(bytes);
+    };
+    auto bytes_field = [&](ByteView bytes) {
+        number(bytes.size());
+        emit(bytes);
+    };
+    auto value = [&](const Value& item) {
+        number(is_null(item));
+        if (is_null(item))
+            return;
+        if (const auto* i = std::get_if<std::int64_t>(&item))
+            number(std::bit_cast<std::uint64_t>(*i));
+        else if (const auto* d = std::get_if<double>(&item))
+            number(std::bit_cast<std::uint64_t>(*d));
+        else if (const auto* text = std::get_if<std::string>(&item))
+            bytes_field(view(*text));
+        else if (const auto* cell = std::get_if<Compact>(&item)) {
+            if (cell->bytes().size() == 8) {
+                number(8);
+                number(std::bit_cast<std::uint64_t>(i64_payload(item)));
+            } else
+                bytes_field(cell->bytes());
+        } else
+            bytes_field(std::get<Opaque>(item).bytes());
+    };
+    bytes_field(view("CORECHG7"));
+    number(state.tables.size());
+    for (const auto& [name, table] : state.tables) {
+        bytes_field(view(name));
+        Bytes schema;
+        write_schema(schema, *table);
+        emit(schema);
+        number(table->next_chunk);
+        number(static_cast<std::uint64_t>(table->next_rowid));
+        number(table->chunks.size());
+        for (const auto& [id, reference] : table->chunks) {
+            const auto chunk = reference.pin();
+            number(id);
+            number(chunk->rows.size());
+            for (std::size_t row = 0; row < chunk->rows.size(); ++row) {
+                number(static_cast<std::uint64_t>(chunk->rowids[row]));
+                for (const auto& item : chunk->rows[row])
+                    value(item);
+            }
+        }
+    }
+    flush();
+    Bytes trailer;
+    encoding::u64(trailer, hash);
+    sink(trailer);
+}
+
+detail::State detail::apply_changes(const State& base, ByteView bytes, const Registry& registry,
+                                    const std::shared_ptr<Pager>& pager) {
     validate_snapshot(bytes);
     Reader reader(bytes.first(bytes.size() - 8));
     auto format = string(reader);
@@ -522,6 +612,7 @@ detail::State detail::apply_changes(const State& base, ByteView bytes, const Reg
             table->next_rowid = static_cast<std::int64_t>(next_rowid);
         }
         auto chunks = count(reader);
+        auto page_columns = pager ? std::make_shared<const std::vector<Column>>(table->columns) : nullptr;
         std::set<std::uint64_t> ids;
         for (std::size_t c = 0; c < chunks; ++c) {
             auto id = reader.u64(), rows = reader.u64();
@@ -547,11 +638,13 @@ detail::State detail::apply_changes(const State& base, ByteView bytes, const Reg
                 chunk->rows.push_back(std::move(row));
             }
             refresh(*chunk);
-            table->chunks[id] = std::move(chunk);
+            table->chunks[id] =
+                pager ? pager->store(std::move(chunk), page_columns) : ChunkRef(std::move(chunk));
         }
         std::set<std::int64_t> identities;
-        for (const auto& [id, chunk] : table->chunks) {
+        for (const auto& [id, reference] : table->chunks) {
             (void)id;
+            const auto chunk = reference.pin();
             for (auto identity : chunk->rowids)
                 if (!identities.insert(identity).second)
                     throw Error(ErrorCode::format, "Duplicate row identity");
@@ -566,5 +659,47 @@ detail::State detail::apply_changes(const State& base, ByteView bytes, const Reg
     checkpoint_size(next);
     next.stats = measure(next);
     return next;
+}
+Bytes detail::encode_page(const Chunk& chunk) {
+    Bytes data;
+    encoding::u64(data, chunk.rows.size());
+    encoding::u64(data, chunk.slots.size());
+    for (auto slot : chunk.slots)
+        encoding::u64(data, slot);
+    for (std::size_t i = 0; i < chunk.rows.size(); ++i) {
+        encoding::u64(data, static_cast<std::uint64_t>(chunk.rowids[i]));
+        for (const auto& value : chunk.rows[i])
+            write_value(data, value);
+    }
+    encoding::u64(data, checksum(data));
+    return data;
+}
+std::shared_ptr<detail::Chunk> detail::decode_page(ByteView data, const std::vector<Column>& columns,
+                                                   const Registry& registry) {
+    validate_snapshot(data);
+    Reader reader(data.first(data.size() - 8));
+    auto rows = reader.u64(), slots = reader.u64();
+    if (rows > chunk_rows || (slots && slots != rows))
+        throw Error(ErrorCode::format, "Invalid cached chunk");
+    auto chunk = std::make_shared<Chunk>();
+    for (std::size_t i = 0; i < slots; ++i) {
+        const auto slot = reader.u64();
+        if (slot > UINT32_MAX || (!chunk->slots.empty() && slot <= chunk->slots.back()))
+            throw Error(ErrorCode::format, "Invalid cached slots");
+        chunk->slots.push_back(static_cast<std::uint32_t>(slot));
+    }
+    chunk->rows.reserve(rows);
+    chunk->rowids.reserve(rows);
+    for (std::size_t i = 0; i < rows; ++i) {
+        chunk->rowids.push_back(static_cast<std::int64_t>(reader.u64()));
+        Row row;
+        row.reserve(columns.size());
+        for (const auto& column : columns)
+            row.push_back(read_value(reader, column.type, registry, true));
+        chunk->rows.push_back(std::move(row));
+    }
+    reader.end();
+    refresh(*chunk);
+    return chunk;
 }
 } // namespace coresql

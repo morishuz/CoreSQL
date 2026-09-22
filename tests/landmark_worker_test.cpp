@@ -60,6 +60,30 @@ int main() {
         }
         expect(ErrorCode::resource, [&] { landmarks::Worker too_small(temp.path / "worker", {1, 1}); });
         expect(ErrorCode::constraint, [&] { landmarks::Worker invalid(temp.path / "other", {100001, 1}); });
+        // FIFO capture must isolate a queued reader from a later deletion, even
+        // when it executes on a reader thread after that deletion commits.
+        std::future<sql::Result> final_read;
+        {
+            landmarks::WorkerLimits limits{2, 64};
+            limits.checkpoint_every = 4;
+            limits.checkpoint_max_delay = std::chrono::milliseconds(0);
+            limits.page_cache_bytes = 1024;
+            landmarks::Worker worker(temp.path / "concurrent-worker", limits);
+            CHECK(worker.try_ingest(std::array{a})->get().changes == 1);
+            for (int i = 0; i < 24; ++i) {
+                auto before = worker.try_search(search);
+                auto erased = worker.try_erase(std::array<std::int64_t, 1>{1});
+                auto after = worker.try_search(search);
+                auto restored = worker.try_ingest(std::array{a});
+                CHECK(before && erased && after && restored);
+                CHECK(before->get().rows.size() == 1);
+                CHECK(erased->get().changes == 1);
+                CHECK(after->get().rows.empty());
+                CHECK(restored->get().changes == 1);
+            }
+            final_read = std::move(*worker.try_search(search));
+        }
+        CHECK(final_read.get().rows.size() == 1); // Shutdown also drains accepted readers.
         // A failing request rolls back its whole batch of observations without
         // rolling back neighboring requests sharing the eventual commit.
         const auto grouped_file = temp.path / "grouped";
@@ -120,6 +144,16 @@ int main() {
                 try {
                     auto accepted = worker.try_ingest(std::array{a});
                     CHECK(accepted && accepted->get().changes == 1);
+                } catch (const Error& error) {
+                    CHECK(error.code == ErrorCode::io);
+                    failed = true;
+                }
+            }
+            // Completion of asynchronous maintenance is independent of the last
+            // few submissions. An explicit barrier observes its failure reliably.
+            if (!failed) {
+                try {
+                    worker.try_checkpoint()->get();
                 } catch (const Error& error) {
                     CHECK(error.code == ErrorCode::io);
                     failed = true;

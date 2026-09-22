@@ -25,14 +25,17 @@ Result run_filtered_join(const Tables& tables, const Query& query, const Registr
         if (candidates_)
             normalize(*candidates_);
         std::vector<RowLocation> selected;
+        QueryBuffer selection_memory;
         visit_chunks(original, candidates_, [&](auto id, const auto& chunk, RowSelection rows) {
             return visit_rows(*chunk, rows, [&](auto position, const Row& row) {
 #ifdef CORESQL_TESTING
                 if (auto* counters = detail::active_query_counters)
                     ++counters->rows_tested;
 #endif
-                if (predicate->matches(RowView(row, chunk->rowids[position]), registry))
+                if (predicate->matches(RowView(row, chunk->rowids[position]), registry)) {
+                    selection_memory.add(sizeof(RowLocation));
                     selected.push_back({id, chunk->slot(position)});
+                }
                 return true;
             });
         });
@@ -103,6 +106,7 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
                         std::none_of(query.order_by.begin(), query.order_by.end(),
                                      [](const Order& o) { return has_aggregate(o.expression); });
     std::vector<RowView> joined_rows;
+    QueryBuffer join_memory;
     std::vector<std::size_t> retained;
     if (!borrow && !query.select.empty()) {
         std::set<std::size_t> needed;
@@ -128,8 +132,11 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
         for (std::size_t i = 0; i < data.types.size(); ++i)
             retained.push_back(i);
     }
+    auto right_pins = pin_table(right);
+    auto left_pins = borrow ? pin_table(left) : std::vector<std::shared_ptr<Chunk>>{};
     std::vector<const Row*> rights;
     visit_table_rows(right, [&](auto, const Row& row, auto) {
+        join_memory.add(2 * sizeof(const Row*) + 1);
         rights.push_back(&row);
         return true;
     });
@@ -153,6 +160,7 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
     std::vector<bool> matched_right(rights.size(), false);
     auto append = [&](const Row& a, const Row& b) {
         if (borrow) {
+            join_memory.add(2 * sizeof(RowView));
             joined_rows.emplace_back(a, b);
             return;
         }
@@ -161,6 +169,7 @@ Result run_general_join(const detail::Tables& tables, const Query& query, const 
         RowView input(a, b);
         for (auto index : retained)
             row.push_back(input[index]);
+        join_memory.add_row(row, sizeof(Row));
         data.rows.push_back(std::move(row));
     };
     visit_table_rows(left, [&](auto, const Row& a, auto) {

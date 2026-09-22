@@ -61,10 +61,12 @@ void synchronize_index(const Table& original, Table& replacement, const Registry
         const auto& type = original.columns[column].type;
         const auto& addon = registry.addon(type);
         for (bool inserting : {false, true})
-            for (const auto& [id, chunk] : replacement.chunks) {
-                const auto& before = original.chunks.find(id)->second;
-                if (before == chunk)
+            for (const auto& [id, reference] : replacement.chunks) {
+                const auto& prior = original.chunks.find(id)->second;
+                if (prior == reference)
                     continue;
+                const auto before = prior.pin();
+                const auto chunk = reference.pin();
                 assert(before->rows.size() == chunk->rows.size());
                 for (std::size_t i = 0; i < chunk->rows.size(); ++i) {
                     const auto& a = before->rows[i][column];
@@ -102,10 +104,12 @@ void synchronize_index(const Table& original, Table& replacement, const Registry
             continue;
         index = std::make_shared<OrderedIndex>(*index);
         for (bool inserting : {false, true})
-            for (const auto& [id, chunk] : replacement.chunks) {
-                const auto& before = original.chunks.find(id)->second;
-                if (before == chunk)
+            for (const auto& [id, reference] : replacement.chunks) {
+                const auto& prior = original.chunks.find(id)->second;
+                if (prior == reference)
                     continue;
+                const auto before = prior.pin();
+                const auto chunk = reference.pin();
                 for (std::size_t i = 0; i < chunk->rows.size(); ++i) {
                     const bool unchanged =
                         std::all_of(index->columns.begin(), index->columns.end(), [&](auto c) {
@@ -136,7 +140,8 @@ void rebuild_indexes(State& state, const Registry& registry) {
     for (auto& [name, table] : state.tables) {
         (void)name;
         make_indexes(*table, registry);
-        for (const auto& [id, chunk] : table->chunks)
+        for (const auto& [id, reference] : table->chunks) {
+            const auto chunk = reference.pin();
             for (std::size_t i = 0; i < chunk->rows.size(); ++i) {
                 const auto& row = chunk->rows[i];
                 const RowLocation location{id, chunk->slot(i)};
@@ -147,6 +152,7 @@ void rebuild_indexes(State& state, const Registry& registry) {
                 for (auto& index : table->indexes)
                     index->data->insert(row[index->column], location);
             }
+        }
     }
 }
 } // namespace coresql::detail

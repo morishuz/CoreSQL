@@ -30,9 +30,12 @@ It is not yet a production replacement for SQLite or DuckDB.
 
 Transactions, savepoints, indexes, crash recovery, backup/restore and a bounded SQL
 dialect are implemented. API/ABI and permanent file compatibility are not promised.
-All live data stays in RAM; the default encoded-state limit is 1 GiB, configurable
-at build time, not a RAM budget. A file has one owner, and calls require external
-serialization. Windows, a server protocol and full SQL compatibility are absent.
+An optional disk-backed chunk cache allows stored payloads to exceed its RAM
+target; indexes, pinned snapshots and query buffers have separate costs. The
+default encoded-state limit is 1 GiB, configurable at build time, not a RAM budget.
+A file has one owner. Opt-in snapshot readers can run alongside serialized commits
+and background checkpoints; each mutable transaction/SQL connection still needs
+external serialization. Windows, a server protocol and full SQL compatibility are absent.
 
 Read the [SQL dialect](docs/contracts/sql.md), [storage contract](docs/contracts/storage.md)
 and [backup/upgrade guide](docs/usage.md) before keeping data you care about.

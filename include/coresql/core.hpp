@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <limits>
 #include <map>
 #include <memory>
@@ -415,6 +416,8 @@ struct QueryOptions {
     std::stop_token cancellation;
     std::optional<std::chrono::steady_clock::time_point> deadline;
     std::size_t max_work = std::numeric_limits<std::size_t>::max();
+    // Accounted engine row/key buffers, not a process RSS or extension allocator cap.
+    std::size_t max_buffer_bytes = std::numeric_limits<std::size_t>::max();
 };
 // The row is borrowed until the callback returns; false stops successfully.
 using RowVisitor = std::function<bool(std::span<const Value>)>;
@@ -422,6 +425,33 @@ struct StreamResult {
     std::vector<Type> types;
     std::size_t rows = 0;
     bool stopped = false;
+};
+struct CursorStats {
+    std::size_t rows = 0, work = 0, peak_buffer_bytes = 0;
+    // Logical payload in the retained snapshot; shared with other snapshots.
+    std::size_t snapshot_payload_bytes = 0;
+    std::chrono::steady_clock::duration age{};
+    bool closed = false;
+};
+// A snapshot-owning, resumable scan. Calls on one cursor require serialization.
+// Output rows are owned; close/destruction releases the retained snapshot.
+class QueryCursor {
+public:
+    struct Impl;
+    explicit QueryCursor(std::unique_ptr<Impl>);
+    QueryCursor(QueryCursor&&) noexcept;
+    QueryCursor& operator=(QueryCursor&&) noexcept;
+    QueryCursor(const QueryCursor&) = delete;
+    QueryCursor& operator=(const QueryCursor&) = delete;
+    ~QueryCursor();
+    const std::vector<Type>& types() const;
+    std::optional<Row> next();
+    Result fetch(std::size_t max_rows);
+    CursorStats stats() const;
+    void close() noexcept;
+
+private:
+    std::unique_ptr<Impl> impl_;
 };
 struct Stats {
     std::size_t tables = 0;
@@ -435,24 +465,59 @@ struct StorageStats {
     std::uint64_t bytes_written = 0, checkpoints = 0;
 };
 
+struct OpenOptions {
+    // Opt in only when all installed callbacks/indexes permit concurrent calls
+    // on independent query/transaction state. Bundled add-ons meet this contract.
+    bool concurrent_reads = false;
+    // Zero keeps the resident backend; a nonzero target enables clean chunk paging.
+    std::size_t page_cache_bytes = 0;
+};
+struct CacheStats {
+    // Clean decoded chunks only. Dirty transactions, indexes, query buffers and
+    // allocator overhead are additional; active pins may exceed the cache target.
+    std::size_t target_bytes = 0, resident_bytes = 0, pinned_bytes = 0, overage_bytes = 0;
+    std::size_t backing_bytes = 0;
+    std::uint64_t page_reads = 0, page_writes = 0, evictions = 0;
+};
+
 namespace detail {
 struct State;
 struct Owner;
 } // namespace detail
 
 class Transaction;
-// All calls on a database and its transactions require external serialization,
-// including queries concurrent with writes. Shared snapshots do not imply thread safety.
+class ReadSnapshot {
+public:
+    ReadSnapshot(const ReadSnapshot&) = default;
+    ReadSnapshot& operator=(const ReadSnapshot&) = default;
+    Result query(const Query&, const QueryOptions& = {}) const;
+    StreamResult query_each(const Query&, const RowVisitor&, const QueryOptions& = {}) const;
+    QueryCursor cursor(const Query&, const QueryOptions& = {}) const;
+    Schema schema() const;
+    Stats stats() const;
+    const Registry& registry() const;
+    std::chrono::steady_clock::duration age() const;
+
+private:
+    friend class Database;
+    ReadSnapshot(std::shared_ptr<const detail::State>, std::shared_ptr<const Registry>);
+    std::shared_ptr<const detail::State> state_;
+    std::shared_ptr<const Registry> registry_;
+    std::chrono::steady_clock::time_point created_;
+};
+// With concurrent_reads enabled, independent snapshots/transactions may execute
+// concurrently and commits are serialized. A mutable Transaction/SQL connection
+// still needs one caller at a time. Destruction/move requires external coordination.
 class Database {
 public:
-    explicit Database(Registry registry = {});
+    explicit Database(Registry registry = {}, OpenOptions = {});
     Database(const Database&) = delete;
     Database& operator=(const Database&) = delete;
     ~Database();
     Database(Database&&) noexcept;
     Database& operator=(Database&&) noexcept;
     // Persistent mode: exclusive local-file ownership; commits synchronize the log.
-    static Database open(const std::filesystem::path&, Registry registry = {});
+    static Database open(const std::filesystem::path&, Registry registry = {}, OpenOptions = {});
     bool persistent() const;
     // Synchronized native backup to a new file; includes committed state only.
     void backup(const std::filesystem::path&) const;
@@ -462,11 +527,20 @@ public:
     static std::size_t encoded_size_limit();
     // Reclaim obsolete persistent records; no effect on transaction snapshots.
     void checkpoint();
+    // Requires concurrent_reads. Retains its committed snapshot/store until completion.
+    // Commits can proceed while writing; retain the future and call get() for errors.
+    std::future<void> checkpoint_async();
+    // An immutable committed read view, valid after later commits/database destruction.
+    // Requires explicit concurrent_reads opt-in for the registry contract above.
+    ReadSnapshot snapshot() const;
     StorageStats storage_stats() const;
+    CacheStats cache_stats() const;
+    void trim_cache();
     Transaction begin();
     Result query(const Query&) const;
     Result query(const Query&, const QueryOptions&) const;
-    // Streams a single-table scan without ORDER/GROUP/DISTINCT/joins/relations/offset.
+    QueryCursor cursor(const Query&, const QueryOptions& = {}) const;
+    // Streams scans, UNION ALL and single INNER/LEFT/CROSS joins without blocking operators.
     // Unsupported shapes fail before delivering any rows; callback errors propagate.
     StreamResult query_each(const Query&, const RowVisitor&, const QueryOptions& = {}) const;
     Stats stats() const;
@@ -541,6 +615,7 @@ public:
     Result erase_returning(const std::string&, std::optional<Predicate> = {});
     Result query(const Query&) const;
     Result query(const Query&, const QueryOptions&) const;
+    QueryCursor cursor(const Query&, const QueryOptions& = {}) const;
     StreamResult query_each(const Query&, const RowVisitor&, const QueryOptions& = {}) const;
     Schema schema() const;
     void commit();

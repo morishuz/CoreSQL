@@ -2,6 +2,70 @@
 #include <set>
 namespace landmarks {
 namespace {
+class ReaderPool {
+public:
+    ReaderPool(std::size_t threads, std::size_t capacity) : capacity_(capacity) {
+        try {
+            for (std::size_t i = 0; i < threads; ++i)
+                threads_.emplace_back([this] {
+                    for (;;) {
+                        std::packaged_task<void()> task;
+                        {
+                            std::unique_lock lock(mutex_);
+                            ready_.wait(lock, [&] { return closing_ || !queue_.empty(); });
+                            if (queue_.empty())
+                                return;
+                            task = std::move(queue_.front());
+                            queue_.pop_front();
+                            ++active_;
+                            ready_.notify_all();
+                        }
+                        task();
+                        {
+                            std::lock_guard lock(mutex_);
+                            --active_;
+                            ready_.notify_all();
+                        }
+                    }
+                });
+        } catch (...) {
+            {
+                std::lock_guard lock(mutex_);
+                closing_ = true;
+            }
+            ready_.notify_all();
+            threads_.clear();
+            throw;
+        }
+    }
+    ~ReaderPool() {
+        {
+            std::lock_guard lock(mutex_);
+            closing_ = true;
+        }
+        ready_.notify_all();
+        threads_.clear();
+    }
+    template <class F> void post(F&& function) {
+        std::packaged_task<void()> task(std::forward<F>(function));
+        std::unique_lock lock(mutex_);
+        ready_.wait(lock, [&] { return queue_.size() < capacity_; });
+        queue_.push_back(std::move(task));
+        ready_.notify_all();
+    }
+    void drain() {
+        std::unique_lock lock(mutex_);
+        ready_.wait(lock, [&] { return queue_.empty() && active_ == 0; });
+    }
+
+private:
+    std::size_t capacity_, active_ = 0;
+    bool closing_ = false;
+    std::mutex mutex_;
+    std::condition_variable ready_;
+    std::deque<std::packaged_task<void()>> queue_;
+    std::vector<std::jthread> threads_;
+};
 void validate(const std::string& model, const std::string& frame, double x, double y,
               const std::array<float, dimensions>& descriptor) {
     if (model.empty() || model.size() > 64 || frame.empty() || frame.size() > 64 || !std::isfinite(x) ||
@@ -30,7 +94,7 @@ sql::Result stage_ingest(sql::Connection& c, std::span<const Observation> batch,
     result.changes = batch.size();
     return result;
 }
-sql::Result search(sql::Connection& c, const Search& request) {
+template <class Connection> sql::Result search(Connection& c, const Search& request) {
     static const sql::Statement query(
         "SELECT id,vector_squared_l2(descriptor,?1) AS distance FROM observations "
         "WHERE model=?2 AND frame=?3 AND x BETWEEN ?4 AND ?5 AND y BETWEEN ?6 AND ?7 "
@@ -71,7 +135,7 @@ Worker::Worker(const std::filesystem::path& path, WorkerLimits limits) : limits_
         limits_.queued_requests > 64 || !limits_.batch_requests || limits_.batch_requests > 64 ||
         limits_.batch_observations < 32 || limits_.batch_observations > 256 ||
         limits_.batch_wait.count() < 0 || limits_.batch_wait > std::chrono::milliseconds(10) ||
-        limits_.checkpoint_max_delay.count() < 0)
+        limits_.checkpoint_max_delay.count() < 0 || limits_.reader_threads > 4)
         throw Error(ErrorCode::constraint, "Invalid worker capacity, queue, batch or maintenance limits");
     std::promise<void> startup;
     auto initialized = startup.get_future();
@@ -157,7 +221,8 @@ void Worker::run(const std::filesystem::path& path, std::promise<void> startup) 
     bool started = false;
     try {
         auto registry = landmarks::registry();
-        auto db = Database::open(path, registry);
+        auto db = Database::open(path, registry,
+                                 {.concurrent_reads = true, .page_cache_bytes = limits_.page_cache_bytes});
         sql::Connection c(db, registry);
         c.enable_query_cache(true);
         const auto existing = db.schema();
@@ -206,37 +271,76 @@ void Worker::run(const std::filesystem::path& path, std::promise<void> startup) 
         auto milliseconds = [](auto duration) {
             return std::chrono::duration<double, std::milli>(duration).count();
         };
-        std::size_t mutations = 0, since_checkpoint = 0;
+        ReaderPool readers(limits_.reader_threads, limits_.queued_requests);
+        std::size_t mutations = 0, since_checkpoint = 0, checkpoint_at = 0;
+        std::optional<std::future<void>> pending_checkpoint;
+        Clock::time_point checkpoint_begin;
         std::optional<Clock::time_point> due;
-        auto checkpoint = [&](bool sample = true) {
-            const auto begin = Clock::now();
-            try {
-                db.checkpoint();
-            } catch (...) {
-                if (sample)
-                    record({LatencySample::checkpoint, 0, milliseconds(Clock::now() - begin), 0, false},
-                           false);
-                throw;
-            }
-            if (sample)
-                record({LatencySample::checkpoint, 0, milliseconds(Clock::now() - begin), 0, true}, false);
-            since_checkpoint = 0;
-            due.reset();
+        auto checkpoint_finished = [&] {
+            since_checkpoint = mutations - checkpoint_at;
             std::lock_guard lock(mutex_);
             ++stats_.checkpoints;
-            stats_.maintenance_due = false;
+        };
+        auto finish_background = [&](bool wait) {
+            if (!pending_checkpoint ||
+                (!wait && pending_checkpoint->wait_for(std::chrono::seconds(0)) != std::future_status::ready))
+                return;
+            auto future = std::move(*pending_checkpoint);
+            pending_checkpoint.reset();
+            try {
+                future.get();
+            } catch (...) {
+                record(
+                    {LatencySample::checkpoint, 0, milliseconds(Clock::now() - checkpoint_begin), 0, false},
+                    false);
+                throw;
+            }
+            record({LatencySample::checkpoint, 0, milliseconds(Clock::now() - checkpoint_begin), 0, true},
+                   false);
+            checkpoint_finished();
+        };
+        auto checkpoint = [&](bool background) {
+            finish_background(true);
+            checkpoint_at = mutations;
+            checkpoint_begin = Clock::now();
+            due.reset();
+            {
+                std::lock_guard lock(mutex_);
+                stats_.maintenance_due = false;
+            }
+            if (background)
+                pending_checkpoint.emplace(db.checkpoint_async());
+            else {
+                readers.drain();
+                db.checkpoint();
+                checkpoint_finished();
+            }
         };
         started = true;
         startup.set_value();
         for (;;) {
+            finish_background(false);
+            if (limits_.checkpoint_every && since_checkpoint >= limits_.checkpoint_every && !due &&
+                !pending_checkpoint) {
+                due = Clock::now();
+                std::lock_guard lock(mutex_);
+                stats_.maintenance_due = true;
+            }
             std::vector<Request> batch;
             bool maintenance = false;
             {
                 std::unique_lock lock(mutex_);
-                ready_.wait(lock, [&] { return closing_ || !queue_.empty() || due.has_value(); });
+                auto work_ready = [&] { return closing_ || !queue_.empty() || due.has_value(); };
+                if (pending_checkpoint)
+                    ready_.wait_for(lock, std::chrono::milliseconds(10), work_ready);
+                else
+                    ready_.wait(lock, work_ready);
                 maintenance = due && (queue_.empty() || Clock::now() - *due >= limits_.checkpoint_max_delay);
-                if (!maintenance && queue_.empty())
-                    break;
+                if (!maintenance && queue_.empty()) {
+                    if (closing_)
+                        break;
+                    continue;
+                }
                 if (!maintenance) {
                     batch.push_back(std::move(queue_.front()));
                     queue_.pop_front();
@@ -262,7 +366,28 @@ void Worker::run(const std::filesystem::path& path, std::promise<void> startup) 
                 }
             }
             if (maintenance) {
-                checkpoint();
+                checkpoint(limits_.background_checkpoints);
+                continue;
+            }
+            if (limits_.reader_threads && std::holds_alternative<Search>(batch[0].operation)) {
+                auto snapshot = db.snapshot();
+                readers.post([this, request = std::move(batch[0]), snapshot = std::move(snapshot),
+                              milliseconds]() mutable {
+                    const auto begin = Clock::now();
+                    try {
+                        sql::ReadConnection connection(std::move(snapshot));
+                        auto result = search(connection, std::get<Search>(request.operation));
+                        record({LatencySample::search, milliseconds(begin - request.accepted),
+                                milliseconds(Clock::now() - begin), 0, true,
+                                milliseconds(Clock::now() - request.accepted)});
+                        request.completion.set_value(std::move(result));
+                    } catch (...) {
+                        record({LatencySample::search, milliseconds(begin - request.accepted),
+                                milliseconds(Clock::now() - begin), 0, false,
+                                milliseconds(Clock::now() - request.accepted)});
+                        request.completion.set_exception(std::current_exception());
+                    }
+                });
                 continue;
             }
             const auto begin = Clock::now();
@@ -363,14 +488,17 @@ void Worker::run(const std::filesystem::path& path, std::promise<void> startup) 
             }
             mutations += successful;
             since_checkpoint += successful;
-            if (limits_.checkpoint_every && since_checkpoint >= limits_.checkpoint_every && !due) {
+            if (limits_.checkpoint_every && since_checkpoint >= limits_.checkpoint_every && !due &&
+                !pending_checkpoint) {
                 due = Clock::now();
                 std::lock_guard lock(mutex_);
                 stats_.maintenance_due = true;
             }
         }
+        readers.drain();
+        finish_background(true);
         if (mutations && since_checkpoint)
-            checkpoint();
+            checkpoint(false);
     } catch (...) {
         if (!started)
             startup.set_exception(std::current_exception());

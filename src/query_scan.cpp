@@ -102,8 +102,11 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
         return result;
     if (!scope.right && !query.search)
         selected = candidates(table, predicate, registry);
-    if (selected)
+    QueryBuffer candidate_memory;
+    if (selected) {
+        candidate_memory.add(selected->rows.size() * sizeof(RowLocation));
         normalize(*selected);
+    }
     // Keep the first owned key inline: single-key sorts need no per-row allocation.
     // Text/custom column and literal keys borrow from the immutable query snapshot.
     struct Match {
@@ -111,8 +114,19 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
         Value key;
         std::vector<Value> more_keys;
         std::size_t ordinal;
+        std::shared_ptr<Chunk> left_pin, right_pin;
     };
     std::vector<Match> matches;
+    QueryBuffer match_memory, result_memory;
+    auto match_bytes = [&](const Match& match) {
+        if (!match_memory.active())
+            return std::size_t{0};
+        std::size_t bytes = 2 * sizeof(Match) + match.more_keys.size() * sizeof(Value);
+        bytes += value_buffer_bytes(match.key);
+        for (const auto& value : match.more_keys)
+            bytes += value_buffer_bytes(value);
+        return bytes;
+    };
     const bool bounded =
         !order.empty() && (scope.right ? query.limit != std::numeric_limits<std::size_t>::max()
                                        : query.limit < table.row_count);
@@ -139,6 +153,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
     Row projected;
     if (consumer)
         projected.reserve(projection.size());
+    std::shared_ptr<Chunk> left_pin, right_pin;
     auto accept = [&](const auto& row) {
         query_step();
 #ifdef CORESQL_TESTING
@@ -160,6 +175,8 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
             projected.clear();
             for (const auto& expression : projection)
                 projected.push_back(expression.evaluate(row, registry));
+            QueryBuffer projection_memory;
+            projection_memory.add_row(projected);
             return (*visitor)(projected) && ++ordinal != query.limit;
         }
         if (consumer) {
@@ -172,6 +189,8 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
                     projected.clear();
                     for (const auto& expression : projection)
                         projected.push_back(expression.evaluate(row, registry));
+                    QueryBuffer projection_memory;
+                    projection_memory.add_row(projected);
                     (*consumer)(projected);
                 } catch (...) {
                     projection_error = std::current_exception();
@@ -180,7 +199,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
             return ++ordinal != query.limit;
         }
         // Evaluate every matching key, including rows outside the final top k.
-        Match match{row, std::int64_t{0}, {}, ordinal++};
+        Match match{row, std::int64_t{0}, {}, ordinal++, left_pin, right_pin};
         if (order.size() > 1)
             match.more_keys.resize(order.size() - 1, std::int64_t{0});
         for (std::size_t i = 0; i < order.size(); ++i)
@@ -194,10 +213,13 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
         if (bounded && matches.size() == query.limit) {
             if (before(match, matches.front())) {
                 std::pop_heap(matches.begin(), matches.end(), before);
+                match_memory.remove(match_bytes(matches.back()));
+                match_memory.add(match_bytes(match));
                 matches.back() = std::move(match);
                 std::push_heap(matches.begin(), matches.end(), before);
             }
         } else {
+            match_memory.add(match_bytes(match));
             matches.push_back(std::move(match));
             if (bounded && matches.size() == query.limit)
                 std::make_heap(matches.begin(), matches.end(), before);
@@ -214,7 +236,9 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
                 break;
     } else if (!selected && !scope.right && !table.selection) {
         bool more = true;
-        for (const auto& [id, chunk] : table.chunks) {
+        for (const auto& [id, reference] : table.chunks) {
+            const auto chunk = reference.pin();
+            left_pin = reference.paged() ? chunk : nullptr;
             (void)id;
 #ifdef CORESQL_TESTING
             ++detail::visited_chunks();
@@ -229,7 +253,8 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
         }
     } else {
         // WHERE stays after ON for joins; pushing it down could change error behavior.
-        visit_chunks(table, selected, [&](auto, const auto& chunk, RowSelection rows) {
+        visit_chunks(table, selected, [&](auto id, const auto& chunk, RowSelection rows) {
+            left_pin = table.chunks.find(id)->second.paged() ? chunk : nullptr;
             return visit_rows(*chunk, rows, [&](auto position, const Row& row) {
                 if (!scope.right)
                     return accept(RowView(row, chunk->rowids[position]));
@@ -244,8 +269,9 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
                         if (auto* counters = detail::active_query_counters)
                             ++counters->candidate_pairs;
 #endif
-                        if (!accept(
-                                RowView(row, indexed_row(*scope.right, location), chunk->rowids[position])))
+                        const auto other = indexed_row(*scope.right, location);
+                        right_pin = other.chunk;
+                        if (!accept(RowView(row, other, chunk->rowids[position])))
                             return false;
                     }
                     return true;
@@ -259,8 +285,9 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
                     if (auto* counters = detail::active_query_counters)
                         ++counters->candidate_pairs;
 #endif
-                    return accept(
-                        RowView(row, indexed_row(*scope.right, *location), chunk->rowids[position]));
+                    const auto other = indexed_row(*scope.right, *location);
+                    right_pin = other.chunk;
+                    return accept(RowView(row, other, chunk->rowids[position]));
                 }
                 if (!query.join->cross && native_join_key(registry.addon(join_left->type))) {
                     const auto& candidates =
@@ -276,7 +303,8 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
                     }
                     return true;
                 }
-                return visit_table_rows(*scope.right, [&](auto, const Row& other, auto) {
+                return visit_table_rows(*scope.right, [&](auto, const Row& other, auto, const auto& pin) {
+                    right_pin = pin;
 #ifdef CORESQL_TESTING
                     if (auto* counters = detail::active_query_counters)
                         ++counters->candidate_pairs;
@@ -301,6 +329,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
             std::stable_sort(matches.begin(), matches.end(), before);
     }
     const auto count = matches.size();
+    result_memory.add(count * sizeof(Row));
     result.rows.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         Row row;
@@ -311,6 +340,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
                 row.push_back(expression.evaluate(input, registry));
         };
         project(matches[i].row);
+        result_memory.add_row(row);
         result.rows.push_back(std::move(row));
     }
 #ifdef CORESQL_TESTING

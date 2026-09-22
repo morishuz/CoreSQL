@@ -8,12 +8,15 @@ namespace {
 struct DistinctAggregate final : AggregateState {
     std::unique_ptr<AggregateState> inner;
     std::set<Row, QueryRowLess> seen;
+    QueryBuffer memory;
     DistinctAggregate(std::unique_ptr<AggregateState> state, const Registry& registry,
                       std::span<const Type> types, bool repeatable)
         : inner(std::move(state)), seen(QueryRowLess{registry, types, repeatable}) {}
     void step(std::span<const Value> values) override {
-        if (seen.emplace(values.begin(), values.end()).second)
+        if (seen.emplace(values.begin(), values.end()).second) {
+            memory.add_row(values, 96);
             inner->step(values);
+        }
     }
     Value finish() override { return inner->finish(); }
 };
@@ -30,6 +33,9 @@ Result run_compound(const Tables& tables, const Query& query, const Registry& re
     input.order_by.clear();
     input.limit = query.limit ? std::numeric_limits<std::size_t>::max() : 0;
     auto data = run(tables, input, registry);
+    QueryBuffer data_memory;
+    for (const auto& row : data.rows)
+        data_memory.add_row(row, sizeof(Row));
     for (const auto& [operation, part] : query.compounds) {
         if (!part)
             fail(ErrorCode::schema, "Missing compound query");
@@ -37,17 +43,27 @@ Result run_compound(const Tables& tables, const Query& query, const Registry& re
         if (!query.limit)
             arm.limit = 0;
         auto other = run(tables, arm, registry);
+        QueryBuffer other_memory;
+        for (const auto& row : other.rows)
+            other_memory.add_row(row, sizeof(Row));
         if (data.types != other.types)
             fail(ErrorCode::type, "Compound query column types differ");
         if (operation == SetOperation::union_all) {
-            for (auto& row : other.rows)
+            for (auto& row : other.rows) {
+                data_memory.add_row(row, sizeof(Row));
                 data.rows.push_back(std::move(row));
+            }
             continue;
         }
         for (const auto& type : data.types)
             if (!registry.orderable(type))
                 fail(ErrorCode::unsupported, "Set operation needs orderable values");
         QueryRowLess less{registry, data.types, query.repeatable};
+        QueryBuffer set_memory;
+        for (const auto& row : data.rows)
+            set_memory.add_row(row, 96);
+        for (const auto& row : other.rows)
+            set_memory.add_row(row, 96);
         std::set<Row, decltype(less)> left(data.rows.begin(), data.rows.end(), less),
             right(other.rows.begin(), other.rows.end(), less);
         data.rows.clear();
@@ -209,9 +225,14 @@ Result run_grouped(const Tables& tables, const Query& query, const Registry& reg
         if (aggregate_error)
             std::rethrow_exception(aggregate_error);
     } else {
-        for (const auto& row : run(tables, input, registry).rows)
+        const auto input_rows = run(tables, input, registry);
+        QueryBuffer input_memory;
+        for (const auto& row : input_rows.rows)
+            input_memory.add_row(row, sizeof(Row));
+        for (const auto& row : input_rows.rows)
             consume(row);
     }
+    QueryBuffer grouped_memory;
     groups.finish([&](const Row& key, States& group) {
         Row row = key;
         for (std::size_t i = 0; i < group.size(); ++i) {
@@ -219,6 +240,7 @@ Result run_grouped(const Tables& tables, const Query& query, const Registry& reg
             registry.validate(value, data.types[query.group_by.size() + i]);
             row.push_back(std::move(value));
         }
+        grouped_memory.add_row(row, sizeof(Row));
         data.rows.push_back(std::move(row));
     });
     final.table = materialize(working, std::move(data));
@@ -233,11 +255,16 @@ Result run_distinct(const Tables& tables, const Query& query, const Registry& re
     for (const auto& t : result.types)
         if (!registry.orderable(t))
             fail(ErrorCode::unsupported, "DISTINCT needs orderable values");
+    QueryBuffer input_memory;
+    for (const auto& row : result.rows)
+        input_memory.add_row(row, sizeof(Row));
     QueryRowLess less{registry, result.types, query.repeatable};
     std::set<Row, decltype(less)> seen(less);
     std::vector<Row> unique;
+    QueryBuffer seen_memory;
     for (auto& row : result.rows)
         if (seen.insert(row).second) {
+            seen_memory.add_row(row, 96);
             if (unique.size() < query.limit)
                 unique.push_back(std::move(row));
         }

@@ -2,6 +2,7 @@
 #include "coresql/core.hpp"
 #include "chunk_map.hpp"
 #include <algorithm>
+#include <mutex>
 
 namespace coresql::detail {
 template <class Tables> auto& require_table(Tables& tables, const std::string& name) {
@@ -68,10 +69,29 @@ struct State {
     Stats stats;
 };
 class DurableStore;
+class Pager;
 struct Owner {
     Registry registry;
     std::shared_ptr<const State> current;
     std::shared_ptr<DurableStore> storage;
+    std::shared_ptr<Pager> pager;
+    OpenOptions options;
+    std::shared_ptr<const Registry> read_registry;
+    mutable std::mutex state_mutex;
+    std::mutex commit_mutex;
+    explicit Owner(Registry r, OpenOptions o)
+        : registry(std::move(r)), current(std::make_shared<const State>()), options(o) {
+        if (options.concurrent_reads)
+            read_registry = std::make_shared<const Registry>(registry);
+    }
+    std::shared_ptr<const State> capture() const {
+        std::lock_guard lock(state_mutex);
+        return current;
+    }
+    void publish(std::shared_ptr<const State> next) {
+        std::lock_guard lock(state_mutex);
+        current = std::move(next);
+    }
 };
 #ifdef CORESQL_TESTING
 struct QueryStageStats {

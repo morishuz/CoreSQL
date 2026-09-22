@@ -24,21 +24,41 @@ storage engine or query executor replaceable plugins. See the
 
 Transactions share snapshots and copy affected structures on writes. Commit
 rejects stale writers; mutations and savepoints preserve atomicity. Persistent
-storage uses an append log and full-state checkpoints, rebuilding indexes on open.
-Snapshot export is distinct from a synchronized durable commit.
+storage uses an append log and full-state checkpoints. Background checkpoints
+encode a committed snapshot while writes continue, then publish a synchronized
+replacement with the subsequent committed log tail. Destructive schema changes
+and the retained-history bound still use synchronous checkpoints. Snapshot export
+is distinct from a synchronized durable commit.
 
-All live rows remain in RAM. Query results and many intermediate structures are
-materialized. Files have one owner and calls require external serialization.
-The [storage contract](../contracts/storage.md) defines guarantees and costs;
-the [relational contract](../contracts/relational.md) defines query behavior.
+One owner holds each persistent file. With `OpenOptions::concurrent_reads` enabled,
+independent committed snapshots can execute concurrently with a writer; commit
+publication is serialized. The application certifies concurrent-safe extensions
+when enabling this option. Mutable transactions, SQL connections and cursors each
+require one caller at a time. There are no cross-process readers or multiple file
+owners. The [storage contract](../contracts/storage.md) defines these guarantees.
 
-The current [landmark-memory pilot](../applications/landmark-memory.md) targets a
-bounded working set that fits in RAM: up to 100,000 128-dimensional landmarks and
-a provisional 1 GiB process budget to validate on deployment hardware. A pager,
-persisted indexes, spill, broader concurrency and strict allocator budgets remain
-future investigations; paging is outside this milestone. Preserve logical
-query interfaces and snapshot-local row identities so future storage changes do
-not leak into application semantics.
+Rows remain resident by default. An optional decoded-chunk cache loads immutable
+pages from private disk backing and retains explicit pins while values are borrowed.
+Native INTEGER primary keys can use disk-backed sorted lookup images, a mutation
+overlay and a disposable persisted reopen cache. That cache is invalidated by a
+changed durable log; other indexes retain their resident implementations. Recovery
+still validates rows and cached mappings. Neither paging nor cached indexes impose
+a total RAM ceiling or guarantee faster reopening.
+
+Resumable cursors cover scans, OFFSET, UNION ALL and a single INNER/LEFT/CROSS join.
+Blocking operators and many joins still materialize state; accounted query-buffer
+limits can fail an operation before further tracked growth, but there is no disk
+spilling or strict allocator budget. See the [execution contract](../contracts/execution.md)
+for supported shapes, lifetime rules and memory exclusions.
+
+The [landmark-memory pilot](../applications/landmark-memory.md) bounds its logical
+map at 100,000 128-dimensional landmarks. Its worker uses one writer, two snapshot
+readers by default, a 64 MiB decoded-chunk target and background checkpoints. The
+provisional 1 GiB process budget remains a deployment measurement target, not an
+enforced ceiling. General persisted index pages, streaming ordered range traversal,
+external-memory operators and predictable storage latency remain further work.
+Preserve logical query interfaces and snapshot-local row identities as storage
+and execution evolve.
 
 ## Development priorities
 

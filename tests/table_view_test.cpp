@@ -16,8 +16,8 @@ int main() {
         auto original = tables.at(original_name);
         // Nonidentity slots exercise logical row IDs and selection lookup.
         auto chunk = original->chunks.begin()->second;
-        for (std::uint32_t i = 0; i < chunk->rows.size(); ++i)
-            chunk->slots.push_back(i * 2);
+        for (std::uint32_t i = 0; i < chunk.pin()->rows.size(); ++i)
+            chunk.pin()->slots.push_back(i * 2);
         std::vector<RowLocation> selected{{0, 2}, {0, 12}, {1, 4}};
         const std::vector<RowLocation> missing{{999, 0}};
         expect(ErrorCode::state, [&] { table_subset(*original, missing); });
@@ -29,7 +29,7 @@ int main() {
             addresses.push_back(&row);
             return true;
         });
-        CHECK(addresses.size() == 3 && addresses[0] == &chunk->rows[1]);
+        CHECK(addresses.size() == 3 && addresses[0] == &chunk.pin()->rows[1]);
         Result copied{{integer(), text()}, {}};
         for (auto row : addresses)
             copied.rows.push_back(*row);

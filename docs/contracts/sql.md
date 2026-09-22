@@ -55,9 +55,14 @@ same name reuses its slot; a new name or anonymous `?` takes the slot after the
 largest assigned slot. `Statement::parameter_index(name)` returns that one-based
 slot, or no value for an unknown name. Parameter count is the largest slot, and
 the supplied span must match it exactly, including unused numbered slots.
-Callback streaming and controlled SELECT execution are described in the
-[execution contract](execution.md); a cursor-style `step()` is not implemented. `Result::columns`
-contains SELECT output names, including for empty results; explicit AS wins, then
+Controlled SELECT execution, callback streaming and resumable cursors are described
+in the [execution contract](execution.md). `Connection::cursor(statement, parameters,
+options)` returns a move-only cursor with `next()`, `fetch(max_rows)`, `columns()`,
+`stats()` and `close()`. It retains its input snapshot across fetches and returns
+owned, unpacked SQL values. Single-table scans, source-free SELECT, OFFSET,
+UNION ALL, and one INNER/LEFT/CROSS join are supported; blocking operators such as
+ORDER BY, grouping and DISTINCT still require materialized execution.
+`Result::columns` contains SELECT output names, including for empty results; explicit AS wins, then
 the source column name, then `column1`, `column2`, etc. for unnamed expressions.
 
 The database must outlive the connection and remain at the same address. Pass the

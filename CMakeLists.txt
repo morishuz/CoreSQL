@@ -3,6 +3,10 @@ project(CoreSQL VERSION 0.1.0 LANGUAGES CXX)
 include(cmake/CheckToolchain.cmake)
 
 option(CORESQL_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
+option(CORESQL_THREAD_SANITIZER "Enable thread sanitizer (separate build)" OFF)
+if(CORESQL_SANITIZERS AND CORESQL_THREAD_SANITIZER)
+  message(FATAL_ERROR "Use separate builds for address/undefined and thread sanitizers")
+endif()
 option(CORESQL_BENCHMARKS "Build the optional SQLite comparison harness" OFF)
 set(CORESQL_MAX_ENCODED_MIB "1024" CACHE STRING "Maximum encoded live state, snapshot and record size in MiB")
 if(NOT CORESQL_MAX_ENCODED_MIB MATCHES "^[1-9][0-9]*$" OR CORESQL_MAX_ENCODED_MIB GREATER 16384)
@@ -11,9 +15,10 @@ endif()
 include(CTest)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+find_package(Threads REQUIRED)
 
 add_library(coresql
-  src/core.cpp src/expression.cpp src/bound.cpp
+  src/core.cpp src/read_snapshot.cpp src/query_cursor.cpp src/pager.cpp src/paged_index.cpp src/expression.cpp src/bound.cpp
   src/query.cpp src/query_scan.cpp src/query_join.cpp src/query_reduce.cpp
   src/disjunctive_join.cpp src/relation.cpp src/subquery_plan.cpp src/mutation.cpp
   src/transaction.cpp src/constraints.cpp src/schema.cpp src/registry.cpp src/index.cpp
@@ -23,6 +28,7 @@ target_include_directories(coresql PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_features(coresql PUBLIC cxx_std_20)
+target_link_libraries(coresql PUBLIC Threads::Threads)
 # Private storage headers are also compiled by in-tree tests and diagnostics.
 # Propagate their configuration in builds without imposing it on installed consumers.
 target_compile_definitions(coresql PUBLIC
@@ -32,6 +38,10 @@ target_compile_options(coresql PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 if(CORESQL_SANITIZERS)
   target_compile_options(coresql PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(coresql PUBLIC -fsanitize=address,undefined)
+endif()
+if(CORESQL_THREAD_SANITIZER)
+  target_compile_options(coresql PUBLIC -fsanitize=thread -fno-omit-frame-pointer)
+  target_link_options(coresql PUBLIC -fsanitize=thread)
 endif()
 
 # Add-ons use the public core API; SQL remains an independently linked frontend.
@@ -49,7 +59,7 @@ coresql_addon(graph addons/graph/graph.cpp)
 coresql_addon(date addons/date/type.cpp)
 coresql_addon(decimal addons/decimal/type.cpp)
 add_library(coresql_sql
-  sql/parser.cpp sql/lower.cpp sql/select.cpp sql/execute.cpp sql/insert.cpp sql/upsert.cpp sql/returning.cpp sql/using.cpp
+  sql/parser.cpp sql/lower.cpp sql/select.cpp sql/execute.cpp sql/cursor.cpp sql/read_connection.cpp sql/insert.cpp sql/upsert.cpp sql/returning.cpp sql/using.cpp
   sql/values.cpp sql/coercion.cpp sql/typing.cpp sql/type_lowering.cpp
   sql/type_adapters.cpp sql/relations.cpp sql/strings.cpp sql/query_cache.cpp
   addons/blob/sql.cpp addons/decimal/sql.cpp addons/date/sql.cpp addons/vector/sql.cpp addons/scalars/sql.cpp)
@@ -118,6 +128,9 @@ function(coresql_test target name source)
 endfunction()
 
 if(BUILD_TESTING)
+  coresql_test(coresql_concurrent_snapshot_test concurrent_snapshots tests/concurrent_snapshot_test.cpp coresql_sql Threads::Threads)
+  coresql_test(coresql_background_checkpoint_test background_checkpoints tests/background_checkpoint_test.cpp coresql Threads::Threads)
+  target_compile_definitions(coresql_background_checkpoint_test PRIVATE CORESQL_TESTING)
   coresql_test(coresql_sql_compatibility_test sql_compatibility tests/sql_compatibility_test.cpp coresql_sql)
   coresql_test(coresql_composite_range_test composite_range tests/composite_range_test.cpp coresql_sql)
   coresql_test(coresql_constraint_recovery_test constraint_recovery tests/constraint_recovery_test.cpp coresql_sql)
@@ -129,6 +142,8 @@ if(BUILD_TESTING)
   coresql_test(coresql_landmark_worker_test landmark_worker tests/landmark_worker_test.cpp coresql_landmark_worker)
   coresql_test(coresql_query_control_test query_control tests/query_control_test.cpp coresql_sql)
   target_compile_definitions(coresql_query_control_test PRIVATE CORESQL_TESTING)
+  coresql_test(coresql_query_cursor_test query_cursor tests/query_cursor_test.cpp coresql_sql)
+  target_compile_definitions(coresql_query_cursor_test PRIVATE CORESQL_TESTING)
   coresql_test(coresql_sql_application_features_test sql_application_features tests/sql_application_features_test.cpp coresql_sql)
   coresql_test(coresql_native_join_test native_hash_joins tests/native_join_test.cpp coresql_sql)
   target_compile_definitions(coresql_native_join_test PRIVATE CORESQL_TESTING)
@@ -180,6 +195,7 @@ if(BUILD_TESTING)
   coresql_test(coresql_decimal_test exact_decimals tests/decimal_test.cpp coresql_sql)
   coresql_test(coresql_date_test calendar_dates tests/date_test.cpp coresql_sql)
   coresql_test(coresql_core_test core_without_addons tests/core_test.cpp coresql)
+  coresql_test(coresql_paging_test paging tests/paging_test.cpp coresql_sql)
   coresql_test(coresql_comparison_test bound_comparisons tests/comparison_test.cpp coresql)
   coresql_test(coresql_addon_test addon_contracts tests/addon_test.cpp coresql_vector coresql_timestamp)
   coresql_test(coresql_mutation_test atomic_mutations tests/mutation_test.cpp coresql_vector coresql_timestamp)
@@ -271,6 +287,8 @@ endif()
 
 # SQLite is an optional test/benchmark oracle and never links into the core.
 if(CORESQL_BENCHMARKS)
+  add_executable(coresql_paging_profile benchmarks/paging_profile.cpp)
+  target_link_libraries(coresql_paging_profile PRIVATE coresql)
   add_executable(coresql_landmark_latency benchmarks/landmark_latency.cpp)
   target_link_libraries(coresql_landmark_latency PRIVATE coresql_landmark_worker)
   add_executable(coresql_prepared_profile benchmarks/prepared_profile.cpp)

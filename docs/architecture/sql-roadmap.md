@@ -8,7 +8,11 @@ Derived tables, ordinary CTEs, DATE/DECIMAL, SQL savepoints, DROP TABLE/INDEX,
 table/column rename, OFFSET, generated integer primary keys and column-only
 INSERT RETURNING, named parameters, table-level composite keys and mixed/qualified
 star projections, CHECK, immediate RESTRICT foreign keys, VALUES UPSERT, BLOB,
-controlled reads, callback scan streaming, JOIN USING, ROUND and column/star UPDATE/DELETE RETURNING are implemented. The pinned 22-query analytical workload has
+controlled reads, JOIN USING, ROUND and column/star UPDATE/DELETE RETURNING are
+implemented. Read-only SQL connections can use committed snapshots. Resumable
+cursors and callback streaming cover scans, OFFSET, UNION ALL and a single
+INNER/LEFT/CROSS join; blocking shapes remain materialized. The pinned 22-query
+analytical workload has
 [recorded correctness and timing evidence](../../benchmarks/tpch/README.md);
 that does not imply full SQL compatibility or production readiness.
 
@@ -16,7 +20,8 @@ that does not imply full SQL compatibility or production readiness.
 
 | Area | Remaining work |
 | --- | --- |
-| Application integration | Broader streaming query shapes, cursor API, expressions in RETURNING |
+| Application integration | Streaming multiple/RIGHT/FULL joins and derived relations, ordered range cursors, expressions in RETURNING |
+| Query memory | More complete buffer accounting and external sort/group/join spilling; current limits do not cap all allocations |
 | Data integrity | Deferred/cascading foreign keys, ADD CONSTRAINT, INSERT SELECT UPSERT and partial conflict targets |
 | SQL convenience | NULLS FIRST/LAST and broader scalar/string functions; check the dialect contract before selecting a form |
 | Advanced queries | Recursive CTEs, windows and persisted views |
@@ -26,7 +31,9 @@ that does not imply full SQL compatibility or production readiness.
 Cascading/deferred foreign keys, triggers and views need further dependency and
 lifecycle design. General SQLite affinity quirks, its file/C ABI and every PRAGMA
 are not compatibility targets. Server protocols and users/roles are outside the
-current embedded-library scope. Paging, concurrent owners and Windows are separate
+current embedded-library scope. Optional row paging, snapshot readers and background
+checkpoints belong to the storage/execution layer. General persisted index pages,
+cross-process readers, concurrent file owners and Windows support remain separate
 platform/storage work, not SQL syntax milestones.
 
 ## Acceptance criteria

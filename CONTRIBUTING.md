@@ -27,6 +27,26 @@ ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
   ctest --test-dir build/check --output-on-failure -j 2
 ```
 
+Use a separate ThreadSanitizer build for concurrency changes; it cannot be combined
+with `CORESQL_SANITIZERS`:
+
+```sh
+cmake -S . -B build/thread-check -DCMAKE_BUILD_TYPE=Debug -DCORESQL_THREAD_SANITIZER=ON
+cmake --build build/thread-check --target coresql_concurrent_snapshot_test \
+  coresql_landmark_worker_test coresql_paging_test -j 4
+TSAN_OPTIONS=halt_on_error=1 \
+  ctest --test-dir build/thread-check \
+  -R '^(concurrent_snapshots|landmark_worker|paging)$' --output-on-failure -j 1
+```
+
+These checks exercise shared snapshots, reader/writer scheduling, checkpoints and
+page ownership. Run the process-crash and injected-I/O durability tests in the
+ordinary Release and ASan/UBSan suites as well. A host that cannot start the TSan
+runtime has not passed the race checks: record that limitation and rerun on a
+supported host instead of suppressing diagnostics. Sanitizer success does not
+certify arbitrary third-party callbacks; custom providers need their own concurrent
+workloads before enabling `OpenOptions::concurrent_reads`.
+
 For the configured-size boundary regression, also run a small-limit build:
 
 ```sh

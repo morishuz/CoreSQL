@@ -31,8 +31,9 @@ keys and return inserted columns through `INSERT ... RETURNING`.
 
 For a persistent database use `Database::open(path, registry)`. Install all required
 add-ons in the registry before opening a file that uses their types or indexes.
-A persistent file has one owner; all calls require external serialization. Live
-rows and indexes remain in RAM. Read the [storage contract](contracts/storage.md)
+A persistent file has one owner. `OpenOptions` enables concurrent committed
+snapshot readers and an optional disk-backed chunk cache. Mutable transactions
+and SQL connections still require one caller at a time. Read the [storage contract](contracts/storage.md)
 before relying on persistence, and use [verified backups](usage.md#backup-and-restore).
 
 ## Module map
@@ -61,7 +62,8 @@ Each contract is the maintained reference for its subject:
 - [SQL](contracts/sql.md): syntax, coercion, generated IDs and unsupported forms.
 - [Relational API](contracts/relational.md): queries, NULLs, joins, aggregation,
   schema operations and callback evaluation rules.
-- [Execution controls](contracts/execution.md): cancellation, work limits and streaming scans.
+- [Execution controls](contracts/execution.md): cancellation, work/buffer limits and resumable cursors.
+- [Concurrent readers](contracts/concurrency.md): retained snapshots, callback requirements and background maintenance.
 - [Storage](contracts/storage.md): atomicity, durability, recovery, formats,
   ownership and resource limits.
 - [Extensions](contracts/extensions.md): type/index registration, callback
@@ -72,7 +74,7 @@ Each contract is the maintained reference for its subject:
 Extensions are trusted native code. They do not replace the transaction manager,
 storage engine or query operators. Returned query rows are owned, but query
 intermediates and retained snapshots can consume substantial memory. The encoded
-size limit is not a total RAM budget.
+size limit and clean-cache target are not total RAM budgets.
 
 ## Scoped savepoints
 

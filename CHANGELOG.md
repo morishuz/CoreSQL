@@ -7,6 +7,17 @@ compatibility and permanent storage-format compatibility are not guaranteed.
 
 ### Core and persistence
 
+- Opt-in concurrent committed snapshots and read-only SQL connections allow readers
+  to run alongside writes. The landmark worker uses a bounded reader pool and
+  background checkpoints that preserve commits made during encoding.
+- Optional disk-backed chunk paging, cache/pin diagnostics and a mapped native
+  INTEGER primary-index implementation reduce resident row/index storage. A
+  verified sidecar caches that index across unchanged-file reopens; other indexes
+  and dirty transactions can still require resident memory.
+- Resumable core/SQL cursors stream scans, UNION ALL and single INNER/LEFT/CROSS
+  joins. Query controls account for operator buffers and report cursor lifetime,
+  work and retained logical payload; they do not impose a whole-process memory cap.
+
 - Composite equality-prefix/range index selection preserves safe predicate order;
   unchanged ordered-index keys are shared during updates.
 - The landmark worker coalesces bounded FIFO ingestion groups with per-request

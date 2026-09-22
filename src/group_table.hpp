@@ -1,5 +1,6 @@
 #pragma once
 #include "comparison.hpp"
+#include "query_control.hpp"
 #include <algorithm>
 #include <map>
 #include <unordered_map>
@@ -49,6 +50,7 @@ template <class State> class GroupTable {
         bool operator()(std::span<const Value> a, const Row& b) const { return same(a, b); }
     };
 
+    execution::QueryBuffer memory_;
     QueryRowLess less_;
     bool native_ = false;
     bool hashed_ = false;
@@ -76,6 +78,7 @@ public:
             } else if (auto found = integers_.find(i64_payload(key[0])); found != integers_.end())
                 return entries_[found->second].second;
             const auto index = entries_.size();
+            memory_.add_row(key, sizeof(State) + 128, 2);
             entries_.emplace_back(Row(key.begin(), key.end()), create());
             if (missing)
                 null_ = index;
@@ -87,13 +90,16 @@ public:
             if (auto found = hashed_map_.find(key); found != hashed_map_.end())
                 return entries_[found->second].second;
             const auto index = entries_.size();
+            memory_.add_row(key, sizeof(State) + 128, 2);
             entries_.emplace_back(Row(key.begin(), key.end()), create());
             hashed_map_.emplace(entries_.back().first, index);
             return entries_.back().second;
         }
         auto found = ordered_.find(key);
-        if (found == ordered_.end())
+        if (found == ordered_.end()) {
+            memory_.add_row(key, sizeof(State) + 96);
             found = ordered_.emplace(Row(key.begin(), key.end()), create()).first;
+        }
         return found->second;
     }
 

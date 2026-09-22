@@ -66,38 +66,51 @@ StreamResult stream(const Tables& tables, const Query& query, const Registry& re
                     const RowVisitor& visit) {
     if (!visit)
         fail(ErrorCode::state, "Streaming requires a row visitor");
-    if (query.table.empty() || query.join || !query.joins.empty() || !query.relations.empty() ||
-        !query.compounds.empty() || !query.order_by.empty() || !query.group_by.empty() || query.having ||
-        query.distinct || query.offset || query.source_where ||
-        std::any_of(query.select.begin(), query.select.end(), has_aggregate))
-        fail(ErrorCode::unsupported,
-             "Streaming requires a single-table scan without ordering, grouping or offset");
-    // Establish normal binding/nesting context and validate the entire shape first.
-    Query shape = query;
-    shape.limit = 0;
-    auto types = run(tables, shape, registry).types;
     if (query_depth >= 64)
         fail(ErrorCode::schema, "Query nesting exceeds 64");
     ++query_depth;
-    const auto* previous = binding_tables;
+    const auto* before = binding_tables;
     struct Restore {
-        const Tables* previous;
+        const Tables* before;
         ~Restore() {
-            binding_tables = previous;
+            binding_tables = before;
             --query_depth;
         }
-    } restore{previous};
+    } restore{before};
     binding_tables = &tables;
-    StreamResult result{std::move(types)};
-    RowVisitor counted = [&](std::span<const Value> row) {
+    // Keep the existing single-table callback executor and its indexed access
+    // paths. Broader shapes use the resumable executor below.
+    const bool simple_scan = !query.table.empty() && !query.join && query.joins.empty() &&
+                             query.relations.empty() && query.compounds.empty() && query.order_by.empty() &&
+                             query.group_by.empty() && !query.having && !query.distinct && !query.offset &&
+                             !query.source_where &&
+                             std::none_of(query.select.begin(), query.select.end(), has_aggregate);
+    if (query.search && !simple_scan)
+        fail(ErrorCode::unsupported, "Search streaming requires a single-table scan");
+    if (simple_scan) {
+        Query shape = query;
+        shape.limit = 0;
+        StreamResult result{run(tables, shape, registry).types};
+        RowVisitor counted = [&](std::span<const Value> row) {
+            ++result.rows;
+            if (!visit(row)) {
+                result.stopped = true;
+                return false;
+            }
+            return true;
+        };
+        run_scan(tables, query, registry, {}, nullptr, nullptr, &counted);
+        return result;
+    }
+    auto cursor = make_cursor(tables, registry, query);
+    StreamResult result{cursor.types()};
+    while (auto row = cursor.next()) {
         ++result.rows;
-        if (!visit(row)) {
+        if (!visit(*row)) {
             result.stopped = true;
-            return false;
+            break;
         }
-        return true;
-    };
-    run_scan(tables, query, registry, {}, nullptr, nullptr, &counted);
+    }
     return result;
 }
 

@@ -46,12 +46,15 @@ int main(int argc, char** argv) {
         }
         std::cout << "phase,rows,kind,sequence,queue_ms,execute_ms,commit_ms,total_ms,success\n"
                   << std::setprecision(10);
-        for (const std::string phase :
-             {"unbatched_manual", "batched_manual", "batched_immediate", "batched_idle"}) {
+        for (const std::string phase : {"unbatched_manual", "batched_manual", "batched_immediate",
+                                        "batched_idle", "batched_background", "batched_paged_background"}) {
             landmarks::WorkerLimits limits{static_cast<std::size_t>(rows), 32};
             limits.batch_requests = phase == "unbatched_manual" ? 1 : 16;
             limits.checkpoint_every = phase.ends_with("manual") ? 0 : 256;
-            limits.checkpoint_max_delay = std::chrono::milliseconds(phase == "batched_immediate" ? 0 : 1000);
+            limits.checkpoint_max_delay = std::chrono::milliseconds(phase == "batched_idle" ? 1000 : 0);
+            limits.background_checkpoints = phase.ends_with("background");
+            limits.reader_threads = phase.ends_with("background") ? 2 : 0;
+            limits.page_cache_bytes = phase == "batched_paged_background" ? 16 * 1024 * 1024 : 0;
             landmarks::Worker worker(file, limits);
             std::uint64_t last = 0;
             auto collect = [&] {
