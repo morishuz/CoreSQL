@@ -25,6 +25,14 @@ std::size_t& detail::visited_chunks() {
     static thread_local std::size_t count = 0;
     return count;
 }
+std::size_t& detail::checkpoint_chunks_encoded() {
+    static thread_local std::size_t count = 0;
+    return count;
+}
+std::size_t& detail::checkpoint_chunks_reused() {
+    static thread_local std::size_t count = 0;
+    return count;
+}
 #endif
 void detail::refresh(Chunk& chunk) {
     chunk.payload_bytes = 0;

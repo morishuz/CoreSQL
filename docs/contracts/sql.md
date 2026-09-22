@@ -476,12 +476,7 @@ escaped tab-separated display text. Scripts execute statement-by-statement;
 use BEGIN/COMMIT for whole-script atomicity. See [the examples](../../examples/README.md),
 [relational API](relational.md), and [benchmark contract](../../benchmarks/speedtest1.md).
 
-UPDATE resolves each assignment target before lowering that assignment's value.
-An unknown target therefore reports a schema error even when its value expression
-is also invalid. WHERE lowering still precedes assignment lowering. Values read
-the original row, and a failed statement publishes no partial updates.
-
-### UPDATE lowering order
+## UPDATE lowering order
 
 UPDATE lowers its WHERE predicate first, then resolves each assignment target
 before lowering that assignment's value. An unknown target therefore reports a
@@ -542,11 +537,12 @@ keys are always positive, including when all existing keys are negative.
 Competing transactions may generate the same candidate; only one can commit and
 the stale transaction must roll back and retry under the existing conflict rules.
 
-The initial maximum uses a native aggregate scan, once per ordinary INSERT
-statement that generates keys, then advances through the batch. REPLACE recomputes
-after each row because a unique conflict can remove the largest key. Bulk callers
-should use multi-row INSERT or INSERT SELECT to amortize this scan. No storage
-format or persistent counter is introduced.
+The maximum is remembered from the rows visible to the transaction and then
+advances through an ordinary multi-row INSERT. It is forgotten when that key is
+updated or removed, so the next allocation reads the stored keys again. Opening
+a database also starts from the stored keys. REPLACE asks again after each row
+because a unique conflict can remove the largest key. No persistent counter is
+stored.
 
 `INSERT`, `INSERT OR REPLACE` and `REPLACE` accept `RETURNING` after VALUES,
 DEFAULT VALUES or SELECT. This initial version supports target column names,

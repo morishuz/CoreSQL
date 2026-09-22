@@ -34,7 +34,9 @@ Set `-DCORESQL_MAX_ENCODED_MIB=2048` at configuration time to select another bou
 This is an admission limit, not a tested memory budget or a throughput guarantee.
 The on-disk log can be larger because it retains recent history.
 
-Rows and indexes stay in RAM. Checkpointing allocates a complete encoded image;
+By default, rows and indexes stay in RAM. Optional paging can store decoded row
+chunks and a native INTEGER primary-key image on disk; other indexes stay
+resident. Checkpointing allocates a complete encoded image;
 backup/restore, query results and retained transaction snapshots can add further
 copies. The regression suite exercises 72 MiB of row payload, beyond the former
 64 MiB boundary, including checkpoint, reopen, backup and snapshot restore. It does
@@ -94,9 +96,10 @@ only skips an existing object; it does not check that its definition is compatib
 For changes outside this dialect, create a new database with the desired schema
 and copy/validate application rows, keeping the original until verification passes.
 
-The current implementation writes CORELOG2 / CORECHG6 and CORESQL5 snapshots and retains
-its existing older-format readers. The new schema operations need no new on-disk
-encoding because incompatible table changes publish a complete checkpoint. Older
+The current implementation writes CORELOG2 framing, CORECHG8 change records and
+CORESQL7 snapshots. Readers still accept CORECHG2 through CORECHG7 and CORESQL1
+through CORESQL6. Dropping or renaming a table or column still publishes a full
+checkpoint rather than a separate schema record. Older
 binaries still have their old size limits. C++ source/ABI and permanent format
 compatibility remain experimental: retain the old binary and registry with backups.
 Before any future upgrade, back up with the old build, test the new build against
@@ -113,4 +116,5 @@ INSERT INTO messages(body) VALUES ('Hello') RETURNING id, body;
 
 Omitted/NULL integer primary keys can be generated; INSERT RETURNING exposes
 columns and aliases. See the [SQL contract](contracts/sql.md#generated-integer-primary-keys-and-insert-returning)
-for deletion reuse, exhaustion, rollback and the initial maximum-scan cost.
+for deletion reuse, exhaustion and rollback. The maximum is remembered until
+that key disappears; opening the file derives it from the stored rows again.

@@ -64,9 +64,10 @@ result is materialized. The current supported shapes are:
 | Single-table WHERE/projection/LIMIT/OFFSET | Yes |
 | Source-free SELECT | Yes |
 | UNION ALL of supported arms | Yes |
-| One INNER, LEFT or CROSS join | Yes |
-| ORDER BY, GROUP BY, aggregates, DISTINCT, other set operations | No |
-| Derived relations/CTEs, multiple joins, RIGHT/FULL joins | No |
+| One or two INNER, LEFT or CROSS joins | Yes |
+| ORDER BY matching an ordered index on one table | Yes |
+| GROUP BY, aggregates, DISTINCT, other set operations | No |
+| Derived relations/CTEs, three or more joins, RIGHT/FULL joins | No |
 | Explicit extension index-search candidate API | No |
 
 Unsupported outer shapes fail when opening the cursor, before delivering rows.
@@ -75,11 +76,11 @@ but reads no input rows. Expressions containing subqueries still execute those
 subqueries through their normal, possibly blocking operators.
 
 Primary-key equality scans and equality joins against a primary key use direct
-lookups. Other filters use resumable chunk traversal, avoiding complete candidate
-lists; this can be slower than the materialized executor's ordered-index or hash
-join path. General joins use nested loops and retain only the current input pins.
-Ordered range iterators, arbitrary streaming join pipelines, blocking cursor
-operators and disk spilling are not implemented.
+lookups. A single-table ORDER BY streams an ordered index when the requested
+columns are a direction-consistent prefix of that index; otherwise the cursor is
+rejected instead of sorting. Other filters use resumable chunk traversal. One or
+two joins use nested loops and retain only the current input pins. Longer join
+pipelines, blocking cursor operators and disk spilling are not implemented.
 
 A cursor owns its snapshot and registry independently of the database, transaction
 or SQL connection that created it. Writes after creation do not change its rows;

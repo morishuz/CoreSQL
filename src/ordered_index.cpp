@@ -202,4 +202,21 @@ std::vector<RowLocation> OrderedIndex::prefix_range(const Row& prefix, const Val
     walk(walk, root_);
     return rows;
 }
+void OrderedIndex::Walk::descend(Link node) {
+    while (node) {
+        stack_.push_back(node);
+        node = reverse_ ? node->right : node->left;
+    }
+}
+OrderedIndex::Walk::Walk(const OrderedIndex& index, bool reverse) : reverse_(reverse) {
+    descend(index.root_);
+}
+std::optional<RowLocation> OrderedIndex::Walk::next() {
+    if (stack_.empty())
+        return {};
+    auto node = stack_.back();
+    stack_.pop_back();
+    descend(reverse_ ? node->left : node->right);
+    return node->location;
+}
 } // namespace coresql::detail

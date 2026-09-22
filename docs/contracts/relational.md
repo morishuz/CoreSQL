@@ -150,12 +150,13 @@ current statistics are returned to the caller, not persisted or consumed by a
 cost optimizer. These are explicitly identified native maintenance equivalents
 in the benchmark, not comparable SQLite maintenance scores.
 
-Exports use CORESQL5 and new log records CORECHG6, retaining CORELOG2 framing.
+Exports use CORESQL7 and new log records CORECHG8, retaining CORELOG2 framing.
 Descriptors include defaults and ordered-index definitions; rows include stable
-identities. Previous export/log record versions remain readable. Recovery checks
-schema evolution and identities, then rebuilds indexes. New writers require the
-new reader. The durability protocol and 64 MiB encoded-state limit are unchanged;
-identities add eight encoded bytes per row.
+identities. Previous export and log record versions remain readable. Recovery
+checks schema evolution and identities, then rebuilds indexes. New writers require
+the new reader. The durability protocol is unchanged; identities add eight encoded
+bytes per row. The encoded-size limit is the configured admission limit in the
+storage contract.
 
 The graph extension and SQL frontend exercise these interfaces. None is
 frozen; multi-table execution/aggregation materialization remains an explicit

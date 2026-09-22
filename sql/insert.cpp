@@ -22,15 +22,13 @@ Result insert(Transaction& tx, const Statement& s, const Registry& registry,
         if (columns[i].primary_key && columns[i].type == integer())
             generated = i;
     const auto returning = returning_columns(s, columns, result);
-    // Compute a starting maximum lazily, once per ordinary multi-row statement.
-    // REPLACE can remove the largest key through another UNIQUE constraint.
+    // One remembered maximum per ordinary statement. REPLACE can remove it
+    // through another UNIQUE constraint, so the next row asks the table again.
     std::optional<std::int64_t> largest;
     auto allocate = [&]() {
         if (!largest) {
-            auto maximum = tx.query(Query{s.table, {aggregate("max", {column(columns[*generated].name)})}});
-            largest = is_null(maximum.rows[0][0])
-                          ? 0
-                          : std::max(std::int64_t{0}, std::get<std::int64_t>(maximum.rows[0][0]));
+            auto maximum = tx.maximum_integer_key(s.table);
+            largest = maximum ? std::max(std::int64_t{0}, *maximum) : 0;
         }
         if (*largest == INT64_MAX)
             throw Error(ErrorCode::constraint, "Generated integer primary key exhausted");

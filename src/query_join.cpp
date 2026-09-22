@@ -60,8 +60,7 @@ Result run_filtered_join(const Tables& tables, const Query& query, const Registr
 // retain the indexed executor below. ON matching is independent of final WHERE.
 Result run_general_join(const detail::Tables& tables, const Query& query, const Registry& registry) {
     const auto& join = *query.join;
-    if (query.alias.empty() || join.alias.empty() || query.alias == join.alias)
-        fail(ErrorCode::schema, "Join requires distinct aliases");
+    require_distinct_join_aliases(query.alias, join.alias);
     const auto& left = *require_table(tables, query.table);
     const auto& right = *require_table(tables, join.table);
     Scope scope(left);

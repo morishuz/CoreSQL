@@ -10,8 +10,8 @@ INSERT RETURNING, named parameters, table-level composite keys and mixed/qualifi
 star projections, CHECK, immediate RESTRICT foreign keys, VALUES UPSERT, BLOB,
 controlled reads, JOIN USING, ROUND and column/star UPDATE/DELETE RETURNING are
 implemented. Read-only SQL connections can use committed snapshots. Resumable
-cursors and callback streaming cover scans, OFFSET, UNION ALL and a single
-INNER/LEFT/CROSS join; blocking shapes remain materialized. The pinned 22-query
+cursors and callback streaming cover scans, OFFSET, UNION ALL, ordered index
+order and one or two INNER/LEFT/CROSS joins; blocking shapes remain materialized. The pinned 22-query
 analytical workload has
 [recorded correctness and timing evidence](../../benchmarks/tpch/README.md);
 that does not imply full SQL compatibility or production readiness.
@@ -20,12 +20,12 @@ that does not imply full SQL compatibility or production readiness.
 
 | Area | Remaining work |
 | --- | --- |
-| Application integration | Streaming multiple/RIGHT/FULL joins and derived relations, ordered range cursors, expressions in RETURNING |
+| Application integration | Streaming three or more joins, RIGHT/FULL joins and derived relations, expressions in RETURNING |
 | Query memory | More complete buffer accounting and external sort/group/join spilling; current limits do not cap all allocations |
 | Data integrity | Deferred/cascading foreign keys, ADD CONSTRAINT, INSERT SELECT UPSERT and partial conflict targets |
 | SQL convenience | NULLS FIRST/LAST and broader scalar/string functions; check the dialect contract before selecting a form |
 | Advanced queries | Recursive CTEs, windows and persisted views |
-| Generated keys | Maintained/index-assisted allocation to avoid the initial MAX scan; sequences or AUTOINCREMENT require separate semantics |
+| Generated keys | Sequences or AUTOINCREMENT, which must not reuse a deleted maximum; the current maximum is already remembered until that key disappears |
 | Types and indexes | Heterogeneous BLOB values in undeclared columns, collations, broader domain operations and partial/expression indexes |
 
 Cascading/deferred foreign keys, triggers and views need further dependency and

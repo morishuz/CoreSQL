@@ -23,19 +23,27 @@ struct RowView {
         return i < left->size() ? (*left)[i] : (*right)[i - left->size()];
     }
 };
+inline void require_distinct_join_aliases(const std::string& base, const std::string& alias) {
+    if (base.empty() || alias.empty() || base == alias)
+        fail(ErrorCode::schema, "Join requires two distinct nonempty aliases");
+}
 struct Scope {
     const detail::Table& left;
     const detail::Table* right = nullptr;
-    std::string left_alias, right_alias;
+    const detail::Table* third = nullptr;
+    std::string left_alias, right_alias, third_alias;
     bool allow_identity = false;
     Scope(const detail::Table& table) : left(table) {}
     std::pair<std::size_t, Type> resolve(const Expr& expression) const {
         const auto* table = &left;
         std::size_t offset = 0;
-        if (right && expression.qualifier.empty())
+        if ((right || third) && expression.qualifier.empty())
             fail(ErrorCode::schema, "Joined columns require an alias");
         if (!expression.qualifier.empty()) {
-            if (right && expression.qualifier == right_alias) {
+            if (third && expression.qualifier == third_alias) {
+                table = third;
+                offset = left.columns.size() + (right ? right->columns.size() : 0);
+            } else if (right && expression.qualifier == right_alias) {
                 table = right;
                 offset = left.columns.size();
             } else if (expression.qualifier != left_alias)

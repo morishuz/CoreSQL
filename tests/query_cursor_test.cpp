@@ -1,6 +1,8 @@
 #include "check.hpp"
 #include "coresql/sql.hpp"
 #include "../src/query.hpp"
+#include <algorithm>
+#include <tuple>
 using namespace coresql;
 
 int main() {
@@ -14,7 +16,7 @@ int main() {
         for (std::int64_t i = 0; i < 1000; ++i)
             sql.execute("INSERT INTO items VALUES(?, ?)", Row{i, std::string(128, 'x')});
         sql.execute("COMMIT");
-        // Cursor construction validates via the ordinary executor even at LIMIT 0.
+        // Opening a cursor binds the query once, including at LIMIT 0.
         // Test the core API: SQL rejects these aliases before reaching it.
         for (bool multi : {false, true})
             for (const auto& aliases :
@@ -163,6 +165,107 @@ int main() {
         CHECK(bound.fetch(2).rows == sql.execute(named, Row{std::int64_t{5}}).rows);
         expect(ErrorCode::unsupported,
                [&] { sql.cursor(sql::Statement("SELECT id FROM items ORDER BY id")); });
+        sql.execute("CREATE INDEX items_id ON items(id)");
+        compare("SELECT id FROM items ORDER BY id LIMIT 5");
+        compare("SELECT id FROM items ORDER BY id DESC LIMIT 4");
+        sql.execute("CREATE TABLE mid(a INTEGER, id INTEGER)");
+        sql.execute("CREATE TABLE tail(b INTEGER, id INTEGER)");
+        sql.execute("INSERT INTO mid VALUES(0,10),(0,11),(2,20)");
+        sql.execute("INSERT INTO tail VALUES(10,100),(11,110)");
+        {
+            sql::Statement statement(
+                "SELECT a.id,b.id,c.id FROM items a JOIN mid b ON a.id=b.a JOIN tail c ON b.id=c.b");
+            auto expected = sql.execute(statement);
+            auto stream = sql.cursor(statement);
+            std::vector<Row> rows;
+            while (auto row = stream.next())
+                rows.push_back(std::move(*row));
+            auto by_id = [](const Row& row) {
+                return std::tuple{std::get<std::int64_t>(row[0]), std::get<std::int64_t>(row[1]),
+                                  std::get<std::int64_t>(row[2])};
+            };
+            std::sort(expected.rows.begin(), expected.rows.end(),
+                      [&](const Row& a, const Row& b) { return by_id(a) < by_id(b); });
+            std::sort(rows.begin(), rows.end(),
+                      [&](const Row& a, const Row& b) { return by_id(a) < by_id(b); });
+            CHECK(rows == expected.rows);
+            CHECK(rows.size() == 2);
+        }
+        compare("SELECT rowid, id FROM items WHERE id<3");
+        {
+            Query mismatched{"items", {column("id")}};
+            mismatched.compounds.push_back(
+                {SetOperation::union_all, std::make_shared<Query>(Query{"keys", {column("label")}})});
+            expect(ErrorCode::type, [&] { db.cursor(mismatched); });
+            Query wider{"items", {column("id")}};
+            wider.compounds.push_back(
+                {SetOperation::union_all,
+                 std::make_shared<Query>(Query{"keys", {column("id"), column("label")}})});
+            expect(ErrorCode::type, [&] { db.cursor(wider); });
+            Query forward{"items", {column("a", "id")}};
+            forward.alias = "a";
+            forward.joins = {Join{"mid", "b", column("b", "id"), column("c", "id")},
+                             Join{"tail", "c", column("a", "id"), column("c", "b")}};
+            expect(ErrorCode::schema, [&] { db.cursor(forward); });
+        }
+        sql.execute("CREATE TABLE left_a(id INTEGER)");
+        sql.execute("CREATE TABLE left_b(a INTEGER, id INTEGER)");
+        sql.execute("CREATE TABLE left_c(a INTEGER, id INTEGER)");
+        sql.execute("INSERT INTO left_a VALUES(1),(2),(3)");
+        sql.execute("INSERT INTO left_b VALUES(1,10)");
+        sql.execute("INSERT INTO left_c VALUES(1,100),(2,200)");
+        {
+            sql::Statement statement("SELECT a.id, b.id, c.id FROM left_a a LEFT JOIN left_b b ON a.id=b.a "
+                                     "LEFT JOIN left_c c ON a.id=c.a");
+            auto expected = sql.execute(statement);
+            auto stream = sql.cursor(statement);
+            std::vector<Row> rows;
+            while (auto row = stream.next())
+                rows.push_back(std::move(*row));
+            auto key = [](const Row& row) { return std::get<std::int64_t>(row[0]); };
+            std::sort(expected.rows.begin(), expected.rows.end(),
+                      [&](const Row& a, const Row& b) { return key(a) < key(b); });
+            std::sort(rows.begin(), rows.end(), [&](const Row& a, const Row& b) { return key(a) < key(b); });
+            CHECK(rows == expected.rows);
+            CHECK(rows.size() == 3);
+            CHECK(is_null(rows[1][1]) && std::get<std::int64_t>(rows[1][2]) == 200);
+            CHECK(is_null(rows[2][1]) && is_null(rows[2][2]));
+        }
+        {
+            sql::Statement statement("SELECT a.id FROM left_a a LEFT JOIN left_b b ON a.id=b.a "
+                                     "JOIN left_c c ON a.id=c.a");
+            auto expected = sql.execute(statement);
+            auto stream = sql.cursor(statement);
+            std::vector<Row> rows;
+            while (auto row = stream.next())
+                rows.push_back(std::move(*row));
+            auto key = [](const Row& row) { return std::get<std::int64_t>(row[0]); };
+            std::sort(expected.rows.begin(), expected.rows.end(),
+                      [&](const Row& a, const Row& b) { return key(a) < key(b); });
+            std::sort(rows.begin(), rows.end(), [&](const Row& a, const Row& b) { return key(a) < key(b); });
+            CHECK(rows == expected.rows);
+            CHECK(rows.size() == 2);
+        }
+        // Resume a NULL-extended first join more than once while its second
+        // input changes in the database. The cursor keeps its original snapshot.
+        {
+            sql.execute("INSERT INTO left_c VALUES(2,201)");
+            sql::Statement statement("SELECT a.id,b.id,c.id FROM left_a a LEFT JOIN left_b b ON a.id=b.a "
+                                     "LEFT JOIN left_c c ON a.id=c.a WHERE a.id=2");
+            const auto expected = sql.execute(statement);
+            CHECK(expected.rows.size() == 2);
+            auto stream = sql.cursor(statement);
+            auto first = stream.next();
+            CHECK(first && *first == expected.rows[0]);
+            sql.execute("UPDATE left_c SET id=id+1000 WHERE a=2");
+            auto second = stream.next();
+            CHECK(second && *second == expected.rows[1]);
+            CHECK(!stream.next());
+        }
+        expect(ErrorCode::unsupported, [&] {
+            sql.cursor(sql::Statement("SELECT a.id FROM items a JOIN mid b ON a.id=b.a JOIN tail c ON "
+                                      "b.id=c.b JOIN keys d ON a.id=d.id"));
+        });
         expect(ErrorCode::unsupported,
                [&] { sql.cursor(sql::Statement("SELECT id FROM items UNION SELECT id FROM keys")); });
         expect(ErrorCode::schema, [&] { sql.cursor(sql::Statement("SELECT missing FROM items LIMIT 0")); });

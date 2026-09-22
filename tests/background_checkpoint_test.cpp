@@ -69,6 +69,33 @@ std::int64_t read(const std::filesystem::path& path) {
 int main() {
     return tests([] {
         TempDirectory temp;
+        {
+            const auto path = temp.path / "reuse";
+            auto db = Database::open(path);
+            auto tx = db.begin();
+            tx.create_table("kept", {{"id", integer()}});
+            tx.create_table("changed", {{"id", integer()}});
+            tx.insert("kept", {std::int64_t{1}});
+            tx.insert("changed", {std::int64_t{1}});
+            tx.commit();
+            db.checkpoint();
+            detail::checkpoint_chunks_reused() = 0;
+            detail::checkpoint_chunks_encoded() = 0;
+            auto next = db.begin();
+            next.insert("changed", {std::int64_t{2}});
+            next.commit();
+            db.checkpoint();
+            CHECK(detail::checkpoint_chunks_reused() >= 1);
+            CHECK(detail::checkpoint_chunks_encoded() >= 1);
+            CHECK(db.query(Query{"kept"}).rows.size() == 1);
+            CHECK(db.query(Query{"changed"}).rows.size() == 2);
+            db.begin().integrity_check();
+        }
+        {
+            auto db = Database::open(temp.path / "reuse");
+            CHECK(db.query(Query{"kept"}).rows.size() == 1);
+            CHECK(db.query(Query{"changed"}).rows.size() == 2);
+        }
         // Both background windows admit acknowledged commits: while the snapshot
         // is being written and after the first tail copy but before publication.
         for (const char* stage : {"background_checkpoint_created", "background_checkpoint_ready"}) {

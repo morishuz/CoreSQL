@@ -45,7 +45,8 @@ changed durable log; other indexes retain their resident implementations. Recove
 still validates rows and cached mappings. Neither paging nor cached indexes impose
 a total RAM ceiling or guarantee faster reopening.
 
-Resumable cursors cover scans, OFFSET, UNION ALL and a single INNER/LEFT/CROSS join.
+Resumable cursors cover scans, OFFSET, UNION ALL, ordered index order, and one or
+two INNER/LEFT/CROSS joins.
 Blocking operators and many joins still materialize state; accounted query-buffer
 limits can fail an operation before further tracked growth, but there is no disk
 spilling or strict allocator budget. See the [execution contract](../contracts/execution.md)
@@ -55,8 +56,9 @@ The [landmark-memory pilot](../applications/landmark-memory.md) bounds its logic
 map at 100,000 128-dimensional landmarks. Its worker uses one writer, two snapshot
 readers by default, a 64 MiB decoded-chunk target and background checkpoints. The
 provisional 1 GiB process budget remains a deployment measurement target, not an
-enforced ceiling. General persisted index pages, streaming ordered range traversal,
-external-memory operators and predictable storage latency remain further work.
+enforced ceiling. General persisted index pages, external-memory operators and
+predictable storage latency remain further work. Ordered index cursors stream a
+matching ORDER BY without sorting.
 Preserve logical query interfaces and snapshot-local row identities as storage
 and execution evolve.
 

@@ -7,6 +7,14 @@ compatibility and permanent storage-format compatibility are not guaranteed.
 
 ### Core and persistence
 
+- Cursors bind a query once. They can stream an ordered index in ORDER BY order
+  and two INNER/LEFT/CROSS joins. A checkpoint reuses the previous encoding of an
+  unchanged resident chunk instead of rebuilding it; the replacement file is still
+  a complete checkpoint.
+- Generated integer primary keys remember the current maximum until that key is
+  removed or changed. Ordinary inserts no longer scan for it. Deleting the
+  maximum still allows that value to be reused, and reopening derives it from
+  the stored rows. There is no persistent sequence.
 - Unique constraint indexes now persist explicit ownership independently of their
   names (`CORESQL7`/`CORECHG8`); older files retain constraint protection on import.
 - Streaming checkpoints and buffered persistence share one value encoder. Native

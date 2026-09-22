@@ -6,6 +6,56 @@
 namespace coresql {
 using namespace detail::execution;
 using detail::require_table;
+namespace {
+std::optional<std::size_t> integer_primary_column(const detail::Table& table) {
+    if (!table.primary)
+        return {};
+    const auto column = table.primary->column;
+    if (column >= table.columns.size() || table.columns[column].type != integer())
+        return {};
+    return column;
+}
+void note_inserted_integer_key(detail::Table& table, std::int64_t key) {
+    if (!table.integer_pk_known) {
+        // The first row is the maximum. A later row must not invent one while
+        // an older key may still be larger. row_count already includes this row.
+        if (table.row_count == 1) {
+            table.integer_pk_known = true;
+            table.integer_pk_max = key;
+        }
+        return;
+    }
+    if (!table.integer_pk_max || key > *table.integer_pk_max)
+        table.integer_pk_max = key;
+}
+void forget_integer_key(detail::Table& table, const Value& value) {
+    if (!table.integer_pk_known)
+        return;
+    const auto* key = std::get_if<std::int64_t>(&value);
+    if (!key || (table.integer_pk_max && *key == *table.integer_pk_max)) {
+        table.integer_pk_known = false;
+        table.integer_pk_max.reset();
+    }
+}
+void observe_integer_key_change(detail::Table& table, const Value& previous, const Value& next) {
+    const auto* old_key = std::get_if<std::int64_t>(&previous);
+    const auto* new_key = std::get_if<std::int64_t>(&next);
+    if (old_key && new_key && *old_key == *new_key)
+        return;
+    if (!table.integer_pk_known || !new_key) {
+        table.integer_pk_known = false;
+        table.integer_pk_max.reset();
+        return;
+    }
+    const bool removed_maximum = old_key && table.integer_pk_max && *old_key == *table.integer_pk_max;
+    if (!table.integer_pk_max || *new_key > *table.integer_pk_max)
+        table.integer_pk_max = *new_key;
+    if (removed_maximum && *new_key != *table.integer_pk_max) {
+        table.integer_pk_known = false;
+        table.integer_pk_max.reset();
+    }
+}
+} // namespace
 
 void Transaction::insert(const std::string& name, Row row) {
     insert_impl(name, std::move(row), {});
@@ -69,6 +119,15 @@ void Transaction::insert_impl(const std::string& name, Row row, std::optional<st
     const auto rowid = identity.value_or(table.next_rowid);
     prepared->rowids.push_back(rowid);
     table.next_rowid = std::max(table.next_rowid, rowid + 1);
+    std::optional<std::int64_t> inserted_key;
+    if (auto column = integer_primary_column(table)) {
+        if (const auto* key = std::get_if<std::int64_t>(&added.rows.front()[*column]))
+            inserted_key = *key;
+        else {
+            table.integer_pk_known = false;
+            table.integer_pk_max.reset();
+        }
+    }
     prepared->rows.push_back(std::move(added.rows.front()));
     prepared->payload_bytes += bytes;
     prepared->encoded_bytes += added.encoded_bytes;
@@ -79,6 +138,8 @@ void Transaction::insert_impl(const std::string& name, Row row, std::optional<st
     table.indexes = std::move(indexes);
     table.ordered = std::move(ordered);
     ++table.row_count;
+    if (inserted_key)
+        note_inserted_integer_key(table, *inserted_key);
     table.payload_bytes += bytes;
     dirty_ = true;
 }
@@ -149,6 +210,11 @@ std::size_t Transaction::update_impl(const std::string& name, std::vector<Assign
                 for (const auto& [index, expression] : bound) {
                     auto value = expression.evaluate(row, owner->registry);
                     detail::validate_stored(value, original.columns[index], owner->registry);
+                    if (!replacement)
+                        replacement = std::make_shared<detail::Table>(original);
+                    if (auto column = integer_primary_column(*replacement))
+                        if (index == *column)
+                            observe_integer_key_change(*replacement, edited->rows[i][index], value);
                     edited->rows[i][index] = std::move(value);
                 }
                 if (returning)
@@ -205,6 +271,8 @@ std::size_t Transaction::erase_impl(const std::string& name, std::optional<Predi
         empty->index_definitions = original.index_definitions;
         empty->next_chunk = original.next_chunk;
         empty->next_rowid = original.next_rowid;
+        if (integer_primary_column(original))
+            empty->integer_pk_known = true;
         detail::make_indexes(*empty, owner->registry);
         detail::validate_replacement_constraints(staged_->tables, name, empty, owner->registry);
         stored = std::move(empty);
@@ -250,6 +318,8 @@ std::size_t Transaction::erase_impl(const std::string& name, std::optional<Predi
                 if (original.primary) {
                     detail::writable_index(replacement->primary)
                         .erase(row[original.primary->column], location);
+                    if (auto column = integer_primary_column(*replacement))
+                        forget_integer_key(*replacement, row[*column]);
                 }
                 for (auto& index : replacement->indexes)
                     detail::writable_index(index).erase(row[index->column], location);
@@ -274,11 +344,38 @@ std::size_t Transaction::erase_impl(const std::string& name, std::optional<Predi
     if (changed) {
         replacement->chunks.remove_empty();
         detail::refresh(*replacement);
+        if (replacement->row_count == 0 && integer_primary_column(*replacement)) {
+            replacement->integer_pk_known = true;
+            replacement->integer_pk_max.reset();
+        }
         detail::validate_replacement_constraints(staged_->tables, name, replacement, owner->registry);
         stored = std::move(replacement);
         dirty_ = true;
     }
     return changed;
+}
+std::optional<std::int64_t> Transaction::maximum_integer_key(const std::string& name) {
+    active();
+    auto& stored = require_table(staged_->tables, name);
+    if (!integer_primary_column(*stored))
+        return {};
+    if (!stored->integer_pk_known) {
+        const auto column = *integer_primary_column(*stored);
+        std::optional<std::int64_t> maximum;
+        visit_table_rows(*stored, [&](auto, const Row& row, auto) {
+            if (const auto* key = std::get_if<std::int64_t>(&row[column]))
+                if (!maximum || *key > *maximum)
+                    maximum = *key;
+            return true;
+        });
+        // Remember the derived maximum on this transaction's table shell.
+        // Publishing it later is a consequence of a real mutation, not a record.
+        if (stored.use_count() != 1)
+            stored = std::make_shared<detail::Table>(*stored);
+        stored->integer_pk_known = true;
+        stored->integer_pk_max = maximum;
+    }
+    return stored->integer_pk_max;
 }
 void Transaction::replace(const std::string& name, Row row) {
     auto owner = active();

@@ -128,5 +128,43 @@ int main() {
                   (std::strcmp(stage, "synced") == 0 ? 107 : 106));
             c.execute("PRAGMA integrity_check");
         }
+        {
+            auto db = Database::open(temp.path / "remembered", registry());
+            sql::Connection c(db, registry());
+            c.execute("CREATE TABLE keys(id INTEGER PRIMARY KEY, other INTEGER UNIQUE)");
+            c.execute("INSERT INTO keys VALUES(1,1),(5,5)");
+            detail::visited_chunks() = 0;
+            CHECK(id(c.execute("INSERT INTO keys(other) VALUES(2) RETURNING id")) == 6);
+            CHECK(detail::visited_chunks() == 0);
+            c.execute("DELETE FROM keys WHERE id=1");
+            detail::visited_chunks() = 0;
+            CHECK(id(c.execute("INSERT INTO keys(other) VALUES(3) RETURNING id")) == 7);
+            CHECK(detail::visited_chunks() == 0);
+            c.execute("DELETE FROM keys WHERE id=7");
+            detail::visited_chunks() = 0;
+            CHECK(id(c.execute("INSERT INTO keys(other) VALUES(4) RETURNING id")) == 7);
+            CHECK(detail::visited_chunks() > 0);
+            c.execute("UPDATE keys SET id=4 WHERE id=7");
+            detail::visited_chunks() = 0;
+            CHECK(id(c.execute("INSERT INTO keys(other) VALUES(8) RETURNING id")) == 7);
+            CHECK(detail::visited_chunks() > 0);
+            c.execute("UPDATE keys SET id=2 WHERE id=5");
+            CHECK(id(c.execute("INSERT INTO keys(other) VALUES(6) RETURNING id")) == 8);
+            c.execute("UPDATE keys SET id=9 WHERE id=6");
+            CHECK(id(c.execute("INSERT INTO keys(other) VALUES(9) RETURNING id")) == 10);
+            c.execute("DELETE FROM keys");
+            CHECK(id(c.execute("INSERT INTO keys(other) VALUES(1) RETURNING id")) == 1);
+            db.checkpoint();
+        }
+        {
+            auto reopened = Database::open(temp.path / "remembered", registry());
+            sql::Connection again(reopened, registry());
+            detail::visited_chunks() = 0;
+            CHECK(id(again.execute("INSERT INTO keys(other) VALUES(2) RETURNING id")) == 2);
+            CHECK(detail::visited_chunks() > 0);
+            detail::visited_chunks() = 0;
+            CHECK(id(again.execute("INSERT INTO keys(other) VALUES(3) RETURNING id")) == 3);
+            CHECK(detail::visited_chunks() == 0);
+        }
     });
 }

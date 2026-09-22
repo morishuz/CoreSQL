@@ -597,6 +597,10 @@ public:
     // Does not test uniqueness or references; actual mutations enforce those.
     void validate_row(const std::string& table, const Row&) const;
     void insert(const std::string& table, Row row);
+    // Largest INTEGER primary key visible to this transaction, or empty when
+    // the table has none. Remembered until that key is updated or removed.
+    // Reopening derives it from stored rows; it is not a persistent sequence.
+    std::optional<std::int64_t> maximum_integer_key(const std::string& table);
     void create_index(const std::string& table, IndexDefinition);
     std::vector<IndexDefinition> indexes(const std::string& table) const;
     void drop_table(const std::string& table);

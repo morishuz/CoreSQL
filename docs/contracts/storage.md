@@ -170,7 +170,9 @@ constraint ownership on unique indexes.
 The reader also accepts existing `CORECHG2/3/4/5/6/7` records, including mixed old/new
 logs. Snapshot exports use `CORESQL7`; the reader still accepts
 `CORESQL1/2/3/4/5/6`. Older binaries reject the new formats. Background checkpointing
-uses the same records and framing. Recovery maps one record at a time for decoding,
+uses the same records and framing. An unchanged resident chunk keeps its previous
+encoding and is copied into the next checkpoint; modified chunks are encoded again.
+The published checkpoint is still a complete record. Recovery maps one record at a time for decoding,
 avoiding an additional anonymous buffer the size of a checkpoint. Final-state
 constraints and uniqueness are validated during open. Earlier
 `CORELOG1` live files are rejected rather than interpreted incorrectly. Before

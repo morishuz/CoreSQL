@@ -2,6 +2,7 @@
 #include "coresql/core.hpp"
 #include "chunk_map.hpp"
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 
 namespace coresql::detail {
@@ -16,6 +17,10 @@ template <class Tables> auto& require_table(Tables& tables, const std::string& n
 // the byte target. Published chunks are never modified through another snapshot.
 inline constexpr std::size_t chunk_rows = 128;
 inline constexpr std::size_t chunk_bytes = 16 * 1024;
+inline std::uint64_t next_chunk_encoding_id() {
+    static std::atomic<std::uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
 struct Chunk {
     std::vector<Row> rows;
     std::vector<std::int64_t> rowids;
@@ -23,6 +28,15 @@ struct Chunk {
     // Empty means identity mapping. Only compacted chunks need slot metadata.
     // Slots are snapshot-local and regenerated when persisted rows are loaded.
     std::vector<std::uint32_t> slots;
+    // Identifies this row image for checkpoint reuse. A copy is a new image.
+    std::uint64_t encoding_id = next_chunk_encoding_id();
+    Chunk() = default;
+    Chunk(const Chunk& other)
+        : rows(other.rows), rowids(other.rowids), payload_bytes(other.payload_bytes),
+          encoded_bytes(other.encoded_bytes), slots(other.slots) {}
+    Chunk(Chunk&&) noexcept = default;
+    Chunk& operator=(const Chunk&) = delete;
+    Chunk& operator=(Chunk&&) noexcept = default;
     std::uint32_t slot(std::size_t position) const {
         return slots.empty() ? static_cast<std::uint32_t>(position) : slots[position];
     }
@@ -55,6 +69,11 @@ struct Table {
     std::vector<std::shared_ptr<IndexBinding>> indexes;
     std::vector<IndexDefinition> index_definitions;
     std::vector<std::shared_ptr<OrderedIndex>> ordered;
+    // Largest INTEGER primary key currently stored. Derived from rows and not
+    // part of the log: unknown after recovery until the next lookup, and
+    // forgotten when that largest key is removed so it can be reused.
+    bool integer_pk_known = false;
+    std::optional<std::int64_t> integer_pk_max;
 };
 using Tables = std::map<std::string, std::shared_ptr<Table>>;
 void validate_constraints(const Tables&, const Registry&, const std::string& changed = {});
@@ -129,5 +148,7 @@ public:
 // Per-thread diagnostics for access-path regression tests; absent in production.
 std::size_t& visited_chunks();
 std::size_t& retained_matches();
+std::size_t& checkpoint_chunks_encoded();
+std::size_t& checkpoint_chunks_reused();
 #endif
 } // namespace coresql::detail

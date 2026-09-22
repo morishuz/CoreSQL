@@ -20,8 +20,7 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
     NativeJoinLookup hash_join;
     const detail::OrderedIndex* ordered_join = nullptr;
     if (query.join) {
-        if (query.alias.empty() || query.join->alias.empty() || query.alias == query.join->alias)
-            fail(ErrorCode::schema, "Join requires two distinct nonempty aliases");
+        require_distinct_join_aliases(query.alias, query.join->alias);
         scope.right = require_table(tables, query.join->table).get();
         scope.right_alias = query.join->alias;
         if (!input_rows && !query.join->cross) {

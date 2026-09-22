@@ -35,5 +35,18 @@ public:
     std::vector<RowLocation> range(const Value&, const Value&) const;
     // Equality prefix followed by an optional inclusive range, in logical order.
     std::vector<RowLocation> prefix_range(const Row&, const Value* lo, const Value* hi) const;
+    // In-order walk of the index. reverse yields the opposite index order.
+    class Walk {
+        std::vector<Link> stack_;
+        bool reverse_ = false;
+        void descend(Link);
+
+    public:
+        Walk(const OrderedIndex&, bool reverse);
+        Walk(const Walk&) = delete;
+        Walk& operator=(const Walk&) = delete;
+        Walk(Walk&&) noexcept = default;
+        std::optional<RowLocation> next();
+    };
 };
 } // namespace coresql::detail

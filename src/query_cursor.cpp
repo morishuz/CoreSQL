@@ -1,6 +1,8 @@
 #include "bound.hpp"
 #include "index.hpp"
+#include "ordered_index.hpp"
 #include "scan.hpp"
+#include <array>
 #include <coroutine>
 #include <utility>
 
@@ -112,17 +114,24 @@ Generator<RowView> source_rows(const Table& table, const Value* primary_key = nu
 void validate_streamable(const Query& query, unsigned depth = 0) {
     if (depth >= 64)
         fail(ErrorCode::schema, "Cursor query nesting exceeds 64");
-    if (!query.order_by.empty() || !query.group_by.empty() || query.having || query.distinct ||
-        !query.relations.empty() || query.search || query.joins.size() > 1 ||
-        (query.join && !query.joins.empty()) ||
+    const bool joined = query.join || !query.joins.empty();
+    if (!query.group_by.empty() || query.having || query.distinct || !query.relations.empty() ||
+        query.search || query.joins.size() > 2 || (query.join && !query.joins.empty()) ||
         std::any_of(query.select.begin(), query.select.end(), has_aggregate))
         fail(ErrorCode::unsupported,
-             "Cursor requires scans, a single INNER/LEFT join, or UNION ALL without blocking operators");
-    const Join* join = query.join ? &*query.join : query.joins.empty() ? nullptr : &query.joins[0];
-    if (join && join->kind != JoinKind::inner && join->kind != JoinKind::left)
-        fail(ErrorCode::unsupported, "Cursor supports INNER and LEFT joins");
-    if (join && join->right_where && !query.repeatable)
-        fail(ErrorCode::unsupported, "Cursor right-side filtering requires repeatable expressions");
+             "Cursor requires scans, an ordered index scan, one or two INNER/LEFT joins, or UNION ALL");
+    if (!query.order_by.empty() && (joined || !query.compounds.empty()))
+        fail(ErrorCode::unsupported, "Cursor ORDER BY supports a single table");
+    auto reject_join = [&](const Join& join) {
+        if (join.kind != JoinKind::inner && join.kind != JoinKind::left)
+            fail(ErrorCode::unsupported, "Cursor supports INNER and LEFT joins");
+        if (join.right_where && !query.repeatable)
+            fail(ErrorCode::unsupported, "Cursor right-side filtering requires repeatable expressions");
+    };
+    if (query.join)
+        reject_join(*query.join);
+    for (const auto& join : query.joins)
+        reject_join(join);
     for (const auto& [op, arm] : query.compounds) {
         if (op != SetOperation::union_all)
             fail(ErrorCode::unsupported, "Cursor supports UNION ALL only");
@@ -132,126 +141,326 @@ void validate_streamable(const Query& query, unsigned depth = 0) {
     }
 }
 
-Generator<Row> scan(const Tables& tables, const Query& query, const Registry& registry) {
+// One bound shape shared by cursor open and resumption. Compound arms are bound
+// with the parent, so opening a cursor does not plan the query a second time.
+struct StreamPlan {
+    const Table* left = nullptr;
+    const Table* inputs[2] = {};
+    const Join* joins[2] = {};
+    int join_count = 0;
+    std::optional<BoundPredicate> where, source_where;
+    std::optional<BoundPredicate> on[2], side_where[2];
+    std::optional<std::size_t> key_column[2];
+    std::vector<BoundExpr> projection;
+    std::vector<Type> types;
+    const OrderedIndex* order = nullptr;
+    bool reverse_order = false;
+    std::vector<StreamPlan> arms;
+};
+struct Parts {
+    const Row* left = nullptr;
+    std::int64_t id = 0;
+    const Row* row[3] = {};
+    std::size_t width[3] = {};
+    int count = 0;
+    const Value& operator[](std::size_t index) const {
+        for (int part = 0; part < count; ++part) {
+            if (index < width[part])
+                return (*row[part])[index];
+            index -= width[part];
+        }
+        fail(ErrorCode::state, "Column index is outside the joined row");
+    }
+};
+Parts part(const Row& row, std::int64_t id = 0) {
+    Parts parts;
+    parts.left = &row;
+    parts.id = id;
+    parts.row[0] = &row;
+    parts.width[0] = row.size();
+    parts.count = 1;
+    return parts;
+}
+Parts joined(const Parts& prefix, const Row& row) {
+    Parts parts = prefix;
+    parts.row[parts.count] = &row;
+    parts.width[parts.count] = row.size();
+    ++parts.count;
+    return parts;
+}
+Row nulls_for(const Table& table) {
+    Row row;
+    for (const auto& column : table.columns)
+        row.push_back(Null(column.type));
+    return row;
+}
+const OrderedIndex* matching_order(const Table& table, const Query& query, bool& reverse) {
+    for (const auto& index : table.ordered) {
+        if (query.order_by.size() > index->columns.size())
+            continue;
+        std::optional<bool> flip;
+        bool matched = true;
+        for (std::size_t i = 0; i < query.order_by.size(); ++i) {
+            const auto& expression = query.order_by[i].expression;
+            if (expression.kind != Expr::Kind::column ||
+                (!expression.qualifier.empty() && expression.qualifier != query.alias)) {
+                matched = false;
+                break;
+            }
+            auto found = std::find_if(table.columns.begin(), table.columns.end(),
+                                      [&](const Column& column) { return column.name == expression.name; });
+            if (found == table.columns.end() ||
+                static_cast<std::size_t>(found - table.columns.begin()) != index->columns[i]) {
+                matched = false;
+                break;
+            }
+            const bool descending = !index->definition.descending.empty() && index->definition.descending[i];
+            const bool key_flip = query.order_by[i].descending != descending;
+            if (!flip)
+                flip = key_flip;
+            else if (*flip != key_flip) {
+                matched = false;
+                break;
+            }
+        }
+        if (!matched)
+            continue;
+        reverse = flip.value_or(false);
+        return index.get();
+    }
+    fail(ErrorCode::unsupported, "Cursor ORDER BY requires a matching ordered index");
+}
+void check_equality_sides(const Join& join, const Scope& scope, const Registry& registry, std::size_t offset,
+                          std::size_t width) {
+    if (join.cross || join.on)
+        return;
+    if (join.left.kind != Expr::Kind::column || join.right.kind != Expr::Kind::column)
+        fail(ErrorCode::schema, "Join operands must be columns");
+    auto left = bind(join.left, scope, registry);
+    auto right = bind(join.right, scope, registry);
+    if (left.index >= offset)
+        std::swap(left, right);
+    if (left.index >= offset || right.index < offset || right.index >= offset + width)
+        fail(ErrorCode::schema, "Join must compare columns from different sides");
+    if (left.type != right.type)
+        fail(ErrorCode::type, "Join operand types differ");
+}
+std::optional<std::size_t> primary_join_key(const BoundPredicate& on, const Table& right,
+                                            std::size_t right_start) {
+    if (!right.primary || !on.leaf || on.leaf->operation != Compare::equal)
+        return {};
+    const auto right_key = right_start + right.primary->column;
+    const auto& left = on.leaf->left;
+    const auto& other = on.leaf->right;
+    if (left.kind == Expr::Kind::column && other.kind == Expr::Kind::column && other.index == right_key &&
+        left.index < right_start)
+        return left.index;
+    if (other.kind == Expr::Kind::column && left.kind == Expr::Kind::column && left.index == right_key &&
+        other.index < right_start)
+        return other.index;
+    return {};
+}
+StreamPlan bind_stream(const Tables& tables, const Query& query, const Registry& registry) {
+    StreamPlan plan;
     Table scalar;
-    const auto& left = query.table.empty() ? scalar : *require_table(tables, query.table);
+    plan.left = query.table.empty() ? nullptr : require_table(tables, query.table).get();
+    const auto& left = plan.left ? *plan.left : scalar;
+    if (query.join)
+        plan.joins[plan.join_count++] = &*query.join;
+    for (const auto& join : query.joins)
+        plan.joins[plan.join_count++] = &join;
+    if (plan.join_count == 0 && query.source_where)
+        fail(ErrorCode::schema, "source_where requires joins");
+    for (int i = 0; i < plan.join_count; ++i) {
+        require_distinct_join_aliases(query.alias, plan.joins[i]->alias);
+        for (int earlier = 0; earlier < i; ++earlier)
+            require_distinct_join_aliases(plan.joins[earlier]->alias, plan.joins[i]->alias);
+        plan.inputs[i] = require_table(tables, plan.joins[i]->table).get();
+    }
     Scope scope(left);
     scope.left_alias = query.alias;
-    scope.allow_identity = !query.join && query.joins.empty();
-    const Join* join = query.join ? &*query.join : query.joins.empty() ? nullptr : &query.joins[0];
-    std::optional<BoundPredicate> on, right_where;
-    if (join) {
-        scope.right = require_table(tables, join->table).get();
-        scope.right_alias = join->alias;
-        auto condition = join->on;
-        if (!condition && !join->cross)
-            condition = Predicate{join->left, Compare::equal, join->right};
-        on = bind_predicate(condition, scope, registry);
-        Scope right_scope(*scope.right);
-        right_scope.left_alias = join->alias;
-        right_where = bind_predicate(join->right_where, right_scope, registry);
+    scope.allow_identity = plan.join_count == 0;
+    std::size_t offset = left.columns.size();
+    for (int i = 0; i < plan.join_count; ++i) {
+        // Each ON sees only tables joined so far. A later alias is not in scope yet.
+        if (i == 0) {
+            scope.right = plan.inputs[0];
+            scope.right_alias = plan.joins[0]->alias;
+        } else {
+            scope.third = plan.inputs[1];
+            scope.third_alias = plan.joins[1]->alias;
+        }
+        const auto& join = *plan.joins[i];
+        check_equality_sides(join, scope, registry, offset, plan.inputs[i]->columns.size());
+        auto condition = join.on;
+        if (!condition && !join.cross)
+            condition = Predicate{join.left, Compare::equal, join.right};
+        plan.on[i] = bind_predicate(condition, scope, registry);
+        Scope side(*plan.inputs[i]);
+        side.left_alias = join.alias;
+        plan.side_where[i] = bind_predicate(join.right_where, side, registry);
+        if (plan.on[i] && !plan.side_where[i])
+            plan.key_column[i] = primary_join_key(*plan.on[i], *plan.inputs[i], offset);
+        offset += plan.inputs[i]->columns.size();
     }
-    auto where = bind_predicate(query.where, scope, registry);
+    plan.where = bind_predicate(query.where, scope, registry);
     Scope left_scope(left);
     left_scope.left_alias = query.alias;
-    auto source_where = bind_predicate(query.source_where, left_scope, registry);
-    std::vector<BoundExpr> projection;
+    plan.source_where = bind_predicate(query.source_where, left_scope, registry);
     if (query.select.empty()) {
-        for (const auto& c : left.columns)
-            projection.push_back(bind(column(query.alias, c.name), scope, registry));
-        if (scope.right)
-            for (const auto& c : scope.right->columns)
-                projection.push_back(bind(column(scope.right_alias, c.name), scope, registry));
+        for (const auto& column : left.columns)
+            plan.projection.push_back(bind(coresql::column(query.alias, column.name), scope, registry));
+        for (int i = 0; i < plan.join_count; ++i)
+            for (const auto& column : plan.inputs[i]->columns)
+                plan.projection.push_back(
+                    bind(coresql::column(plan.joins[i]->alias, column.name), scope, registry));
     } else
         for (const auto& expression : query.select)
-            projection.push_back(bind(expression, scope, registry));
-    auto project = [&](const RowView& row) -> std::optional<Row> {
+            plan.projection.push_back(bind(expression, scope, registry));
+    for (const auto& expression : plan.projection)
+        plan.types.push_back(expression.type);
+    if (!query.order_by.empty())
+        plan.order = matching_order(left, query, plan.reverse_order);
+    return plan;
+}
+StreamPlan bind_tree(const Tables& tables, const Query& query, const Registry& registry) {
+    auto plan = bind_stream(tables, query, registry);
+    for (const auto& [op, arm] : query.compounds) {
+        (void)op;
+        auto bound = bind_tree(tables, *arm, registry);
+        if (bound.types != plan.types)
+            fail(ErrorCode::type, "Compound query column types differ");
+        plan.arms.push_back(std::move(bound));
+    }
+    return plan;
+}
+Generator<Row> scan(const Tables&, const Query&, const Registry& registry, StreamPlan plan) {
+    auto project = [&](const Parts& row) -> std::optional<Row> {
         query_step();
 #ifdef CORESQL_TESTING
         if (auto* counters = detail::active_query_counters)
             ++counters->rows_tested;
 #endif
-        if (where && !where->matches(row, registry))
+        if (plan.where && !plan.where->matches(row, registry))
             return {};
         Row output;
-        output.reserve(projection.size());
-        for (const auto& expression : projection)
+        output.reserve(plan.projection.size());
+        for (const auto& expression : plan.projection)
             output.push_back(expression.evaluate(row, registry));
         return output;
     };
-    if (query.table.empty()) {
+    if (!plan.left) {
         const Row empty;
-        if (auto row = project(RowView(empty, 1)))
+        if (auto row = project(part(empty, 1)))
             co_yield std::move(*row);
         co_return;
     }
-    Row null_right;
-    if (join && join->kind == JoinKind::left)
-        for (const auto& c : scope.right->columns)
-            null_right.push_back(Null(c.type));
     const Value* primary_key = nullptr;
-    if (!join && left.primary && where) {
-        const BoundPredicate* guard = &*where;
+    if (plan.join_count == 0 && !plan.order && plan.left->primary && plan.where) {
+        const BoundPredicate* guard = &*plan.where;
         while (guard->kind == Predicate::Kind::all && !guard->children.empty())
             guard = &guard->children.front();
         const auto* direct = guard->direct_comparison();
-        if (direct && direct->operation == Compare::equal && direct->left.index == left.primary->column &&
-            !is_null(direct->right.value))
+        if (direct && direct->operation == Compare::equal &&
+            direct->left.index == plan.left->primary->column && !is_null(direct->right.value))
             primary_key = &direct->right.value;
     }
-    std::optional<std::size_t> join_key;
-    if (join && !right_where && scope.right->primary && on && on->leaf &&
-        on->leaf->operation == Compare::equal) {
-        const auto* a = &on->leaf->left;
-        const auto* b = &on->leaf->right;
-        if (a->index >= left.columns.size())
-            std::swap(a, b);
-        if (a->kind == Expr::Kind::column && b->kind == Expr::Kind::column &&
-            a->index < left.columns.size() && b->index == left.columns.size() + scope.right->primary->column)
-            join_key = a->index;
-    }
-    auto left_rows = source_rows(left, primary_key);
-    while (left_rows.advance()) {
-        auto a = left_rows.value();
-        if (source_where && !source_where->matches(a, registry))
-            continue;
-        if (!join) {
-            if (auto row = project(a))
-                co_yield std::move(*row);
-            continue;
-        }
-        bool matched = false;
-        const Value* key = join_key ? &a[*join_key] : nullptr;
-        auto right_rows = source_rows(*scope.right, key);
-        while ((!key || !is_null(*key)) && right_rows.advance()) {
-            auto b = right_rows.value();
-            if (right_where && !right_where->matches(b, registry))
+    if (plan.order) {
+        OrderedIndex::Walk walk(*plan.order, plan.reverse_order);
+        while (auto location = walk.next()) {
+            if (plan.left->selection &&
+                !std::binary_search(plan.left->selection->begin(), plan.left->selection->end(), *location))
                 continue;
-            RowView pair(*a.left, *b.left, a.id);
             query_step();
-            if (on && !on->matches(pair, registry))
-                continue;
-            matched = true;
-            if (auto row = project(pair))
+            auto found = plan.left->chunks.find(location->chunk);
+            if (found == plan.left->chunks.end())
+                fail(ErrorCode::state, "Cursor ordered index references a missing chunk");
+            auto pinned = pin_chunk(found->second);
+            auto position = pinned->position(location->slot);
+            if (position == pinned->rows.size())
+                fail(ErrorCode::state, "Cursor ordered index references a missing row");
+            if (auto row = project(part(pinned->rows[position], pinned->rowids[position])))
                 co_yield std::move(*row);
         }
-        if (!matched && join->kind == JoinKind::left)
-            if (auto row = project(RowView(*a.left, null_right, a.id)))
+        co_return;
+    }
+    Row null_input[2];
+    for (int i = 0; i < plan.join_count; ++i)
+        if (plan.joins[i]->kind == JoinKind::left)
+            null_input[i] = nulls_for(*plan.inputs[i]);
+    auto left_rows = source_rows(*plan.left, primary_key);
+    while (left_rows.advance()) {
+        auto left = left_rows.value();
+        auto base = part(*left.left, left.id);
+        if (plan.source_where && !plan.source_where->matches(base, registry))
+            continue;
+        // Own the descriptor across suspension, including NULL-extended temporaries.
+        auto probe_second = [&](Parts pair) -> Generator<Row> {
+            if (plan.join_count < 2) {
+                if (auto row = project(pair))
+                    co_yield std::move(*row);
+                co_return;
+            }
+            bool matched_second = false;
+            const Value* second_key = plan.key_column[1] ? &pair[*plan.key_column[1]] : nullptr;
+            auto second_rows = source_rows(*plan.inputs[1], second_key);
+            while ((!second_key || !is_null(*second_key)) && second_rows.advance()) {
+                auto second = second_rows.value();
+                if (plan.side_where[1] && !plan.side_where[1]->matches(part(*second.left), registry))
+                    continue;
+                auto triple = joined(pair, *second.left);
+                query_step();
+                if (plan.on[1] && !plan.on[1]->matches(triple, registry))
+                    continue;
+                matched_second = true;
+                if (auto row = project(triple))
+                    co_yield std::move(*row);
+            }
+            if (!matched_second && plan.joins[1]->kind == JoinKind::left)
+                if (auto row = project(joined(pair, null_input[1])))
+                    co_yield std::move(*row);
+        };
+        if (plan.join_count == 0) {
+            if (auto row = project(base))
                 co_yield std::move(*row);
+            continue;
+        }
+        bool matched_first = false;
+        const Value* first_key = plan.key_column[0] ? &(*left.left)[*plan.key_column[0]] : nullptr;
+        auto first_rows = source_rows(*plan.inputs[0], first_key);
+        while ((!first_key || !is_null(*first_key)) && first_rows.advance()) {
+            auto first = first_rows.value();
+            if (plan.side_where[0] && !plan.side_where[0]->matches(part(*first.left), registry))
+                continue;
+            auto pair = joined(base, *first.left);
+            query_step();
+            if (plan.on[0] && !plan.on[0]->matches(pair, registry))
+                continue;
+            matched_first = true;
+            auto matches = probe_second(pair);
+            while (matches.advance())
+                co_yield std::move(matches.value());
+        }
+        if (!matched_first && plan.joins[0]->kind == JoinKind::left) {
+            auto matches = probe_second(joined(base, null_input[0]));
+            while (matches.advance())
+                co_yield std::move(matches.value());
+        }
     }
 }
 
-Generator<Row> rows(const Tables& tables, Query query, const Registry& registry) {
+Generator<Row> rows(const Tables& tables, Query query, const Registry& registry, StreamPlan plan) {
     if (!query.limit)
         co_return;
     const auto limit = query.limit;
     auto remaining_offset = query.offset;
     std::size_t emitted = 0;
     auto compounds = std::move(query.compounds);
+    auto arms = std::move(plan.arms);
     query.compounds.clear();
     query.offset = 0;
     query.limit = std::numeric_limits<std::size_t>::max();
-    auto input = scan(tables, query, registry);
+    auto input = scan(tables, query, registry, std::move(plan));
     while (input.advance()) {
         if (remaining_offset) {
             --remaining_offset;
@@ -261,9 +470,8 @@ Generator<Row> rows(const Tables& tables, Query query, const Registry& registry)
         if (++emitted == limit)
             co_return;
     }
-    for (const auto& [operation, arm] : compounds) {
-        (void)operation;
-        auto input = rows(tables, *arm, registry);
+    for (std::size_t i = 0; i < compounds.size(); ++i) {
+        auto input = rows(tables, *compounds[i].second, registry, std::move(arms[i]));
         while (input.advance()) {
             if (remaining_offset) {
                 --remaining_offset;
@@ -299,16 +507,15 @@ struct QueryCursor::Impl {
         : tables(std::move(t)), registry(std::move(r)), query(std::move(q)), options(std::move(o)) {
         using namespace detail::execution;
         QueryControl control(options, &usage);
+        BindingScope binding(tables);
         validate_streamable(query);
-        auto shape = query;
-        shape.limit = 0;
-        shape.offset = 0;
-        types = run(tables, shape, registry).types;
+        auto plan = bind_tree(tables, query, registry);
+        types = plan.types;
+        input = rows(tables, query, registry, std::move(plan));
         for (const auto& [name, table] : tables) {
             (void)name;
             counters.snapshot_payload_bytes += table->payload_bytes;
         }
-        input = rows(tables, query, registry);
         control.check();
     }
     void release() noexcept {
