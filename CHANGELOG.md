@@ -7,117 +7,61 @@ compatibility and permanent storage-format compatibility are not guaranteed.
 
 ### Core and persistence
 
-- Cursors bind a query once. They can stream an ordered index in ORDER BY order
-  and two INNER/LEFT/CROSS joins. A checkpoint reuses the previous encoding of an
-  unchanged resident chunk instead of rebuilding it; the replacement file is still
-  a complete checkpoint.
-- Generated integer primary keys remember the current maximum until that key is
-  removed or changed. Ordinary inserts no longer scan for it. Deleting the
-  maximum still allows that value to be reused, and reopening derives it from
-  the stored rows. There is no persistent sequence.
-- Unique constraint indexes now persist explicit ownership independently of their
-  names (`CORESQL7`/`CORECHG8`); older files retain constraint protection on import.
-- Streaming checkpoints and buffered persistence share one value encoder. Native
-  i64 add-ons participate in the OR-equality join rewrite; native join paths share
-  a source-ordered merge of matching and NULL candidate positions.
-
-- Opt-in concurrent committed snapshots and read-only SQL connections allow readers
-  to run alongside writes. The landmark worker uses a bounded reader pool and
-  background checkpoints that preserve commits made during encoding.
-- Optional disk-backed chunk paging, cache/pin diagnostics and a mapped native
-  INTEGER primary-index implementation reduce resident row/index storage. A
-  verified sidecar caches that index across unchanged-file reopens; other indexes
-  and dirty transactions can still require resident memory.
-- Resumable core/SQL cursors stream scans, UNION ALL and single INNER/LEFT/CROSS
-  joins. Query controls account for operator buffers and report cursor lifetime,
-  work and retained logical payload; they do not impose a whole-process memory cap.
-
-- Composite equality-prefix/range index selection preserves safe predicate order;
-  unchanged ordered-index keys are shared during updates.
-- The landmark worker coalesces bounded FIFO ingestion groups with per-request
-  savepoints, supports explicit/idle-deferred checkpoints, and records bounded
-  queue/execution/commit/total latency diagnostics.
-
-- Persistent CHECK expressions and immediate RESTRICT foreign keys enforce native
-  and SQL writes, survive rollback/renames/recovery and reject invalid imports.
-  CORESQL6/CORECHG7 carry their metadata; older formats remain readable.
-- Cooperative query cancellation, deadlines and work limits, plus callback streaming
-  for single-table scans. These are not allocator caps or real-time guarantees.
-
-- Certified native TEXT, REAL and compact i128 equality joins build snapshot-local
-  hash lookups, preserving duplicate order, NULL evaluation and custom-provider
-  fallback. Text keys borrow stored values instead of copying payloads.
-
-- Type add-ons declare a closed `layout` and optional `native_ops`. Query
-  execution specializes on those, not on integer type identity.
-- Custom types may use tagged compact `i64`/`i128` cells; INTEGER/REAL/TEXT stay
-  untagged. Hash joins and grouping then follow `native_ops` for those layouts.
-- DATE and TIMESTAMP store compact `i64` cells with `native_ops`, so they share
-  integer hash joins and grouping. On-disk encoding remains length-prefixed
-  little-endian days/microseconds.
-- DECIMAL stores a compact `i128` coefficient; on-disk bytes match the previous
-  Opaque encoding.
-- Bound function evaluation validates every returned value. Type lookup and
-  `validate_type` run at bind; per-row checks are layout and `validate_value`.
-  `native_ops` remains a comparison and hash certificate, not a validity shortcut.
-- The bundled hash index stores native i64 keys in hash tables instead of
-  ordered maps, including DATE and TIMESTAMP primary keys.
-- Compact cells intern types without allocating on hits, encode DECIMAL inline,
-  and pack payload width into the type pointer so `Value` stays 32 bytes.
-  Interning keeps an 8-entry thread-local cache; DECIMAL arithmetic retains
-  interned result types. Repeatable grouping hashes native_ops keys, not only a
-  single i64 column. Eligible general inner ON joins retain borrowed matched-row
-  pairs, preserving complete ON evaluation, NULL candidates and phase ordering
-  before WHERE/sort/projection without copying intermediate values.
-- Typed relational API with joins, grouping, aggregates, ordering, indexes and
-  correlated subqueries; statement-atomic mutations and snapshot transactions.
-- Durable logs, checkpoints, backup/restore, integrity checks, named savepoints
-  and transactional schema changes.
-- Configurable encoded-state limit, defaulting to 1 GiB, with boundary and
-  recovery coverage. Existing nullable-column migration fixtures remain supported.
+- Typed relational queries with joins, grouping, aggregates, ordering, indexes and
+  correlated subqueries; atomic mutations, snapshot transactions and savepoints.
+- Durable commits, recovery, integrity checks, backup/restore and explicit or
+  automatic checkpoints. Optional background checkpoints allow writes to continue
+  during encoding and preserve subsequent acknowledged commits.
+- Opt-in concurrent committed snapshots and read-only SQL connections. Applications
+  must supply extensions that support concurrent calls.
+- Optional disk-backed row paging and native INTEGER primary-key lookup caching.
+  Cache targets exclude dirty transactions, other indexes and query memory.
+- Resumable core/SQL cursors and callback streaming for scans, OFFSET, UNION ALL,
+  one or two INNER/LEFT/CROSS joins, and single-table ORDER BY with a matching
+  ordered index. Cursors retain their snapshot and return owned rows.
+- Cooperative cancellation, deadlines, work limits and operator-buffer limits.
+  These do not impose hard real-time deadlines or a whole-process memory cap.
+- Persistent CHECK constraints, immediate RESTRICT foreign keys and composite
+  unique keys apply to SQL and native writes. Constraint-owned indexes cannot be
+  dropped independently of their table.
+- Composite ordered-index equality/range searches and atomic UPDATE/DELETE results.
+- Configurable encoded-state limits, schema inspection, table/column rename,
+  DROP TABLE/INDEX, ANALYZE, VACUUM and payload/cache/storage diagnostics.
 
 ### SQL and extensions
 
-- JOIN USING with merged inner/outer keys, scalar ROUND, and column/star
-  UPDATE/DELETE RETURNING with native atomic result capture.
-- Parameterized logical SELECT templates accept changing values, with fresh
-  snapshot binding and schema/type/NULL-shape invalidation.
+- SQL parameters include positional and named slots. SELECT supports nullable
+  values, casts, CASE/COALESCE, derived tables, ordinary CTEs, compound queries,
+  outer joins, JOIN USING and mixed or qualified star projections.
+- Generated INTEGER primary keys, DEFAULT VALUES and column/star RETURNING for
+  INSERT, UPDATE and DELETE. Generated keys may reuse a deleted maximum; they are
+  not persistent sequences or AUTOINCREMENT.
+- VALUES/DEFAULT VALUES UPSERT supports targeted DO UPDATE and DO NOTHING.
+  CHECK, NOT NULL and foreign-key failures remain errors.
+- Optional bounded connection-local caching of repeatable SELECT templates.
+  Parameter values are supplied afresh, and execution uses the current snapshot.
+- Scalar, JSON, VECTOR, BLOB, DATE, DECIMAL, TIMESTAMP, spatial and graph add-ons.
+  Extension interfaces cover types, functions, aggregates and indexes; extensions
+  remain trusted native code.
+- A bounded landmark-memory example provides vector retrieval, explicit retention,
+  queue backpressure, durable write acknowledgements and operational diagnostics.
 
-- VALUES/DEFAULT VALUES UPSERT with targeted DO UPDATE, DO NOTHING and existing
-  column RETURNING support; CHECK/NOT NULL/foreign-key errors remain errors.
-- Independent BLOB add-on and SQL adapter with hex literals, byte length, ordering
-  and explicit raw-byte TEXT conversions.
-- One opt-in, bounded connection-local cache for repeatable logical SELECT plans with
-  stable parameter types and schema; execution binding remains snapshot-local.
-- Bounded landmark worker with model/frame identities, queue backpressure, explicit
-  retention, synchronized acknowledgements and operational/soak profiles.
+### Compatibility
 
-- Named parameter slots, table-level composite PRIMARY KEY/UNIQUE declarations,
-  and mixed/qualified star projections. Constraints use native indexes and
-  nullability and survive durable reopening.
+- Type providers declare `layout` and may certify native comparison/hash semantics
+  with `native_ops`. Custom i64/i128 types can use tagged compact values. Function
+  results remain validated regardless of that certificate; see the
+  [extension contract](docs/contracts/extensions.md).
+- New exports use `CORESQL7`, and durable records use `CORECHG8` with `CORELOG2`
+  framing. Older supported formats remain readable, including migration of legacy
+  unique-constraint protection. Older binaries reject newly written formats;
+  retain verified backups before upgrading. See the
+  [storage contract](docs/contracts/storage.md#formats-and-migration).
 
-- SQL frontend with parameters, nullable columns, casts, CASE/COALESCE, compound
-  queries, outer joins, derived tables, ordinary CTEs and aggregate expressions.
-- Generated integer primary keys, column-only INSERT RETURNING, DEFAULT VALUES,
-  DROP TABLE/INDEX, rename operations, LIMIT/OFFSET and result-column metadata.
-- Shared SQL type adapters for INTEGER, REAL, TEXT, DATE, DECIMAL and VECTOR.
-  DATE provides calendar values; DECIMAL preserves exact numeric input and
-  arithmetic; VECTOR provides construction, conversion and squared L2 distance.
-- Backend and SQL sources grouped by provider, with unchanged backend encodings
-  and a runnable custom-type example using only public interfaces.
-- Preserve streaming and correlated reuse for repeatable adapter operations;
-  avoid redundant conversion dispatch and temporary insert conversion expressions.
-- Additional backend extensions for timestamps, JSON, spatial values and graphs.
+### Tooling
 
-### Tooling and validation
-
-- Curated SQL benchmark suite adds attributed speedtest1 star/FP, DuckDB micro
-  and H2O grouping/join workloads alongside full speedtest1 main and TPC-H runs,
-  with pinned references, full-result checks and untimed execution diagnostics.
-- Relocatable CMake packages, installed-consumer checks, persistent SQL and admin
-  examples, and macOS/Linux Release and sanitizer CI.
-- Pinned SQLLogicTest fixtures, SQL differential tests, storage recovery tests
-  and optional SQLite/DuckDB comparison tools. See [benchmark methods](benchmarks/README.md)
-  for workloads, reference versions and measurement limits.
-
-See the [documentation index](docs/README.md) for current capabilities and contracts.
+- Relocatable CMake packages, installed-consumer checks, SQL/admin examples,
+  SQLLogicTest fixtures, differential tests and Release/sanitizer CI.
+- Reproducible TPC-H Q1–Q22 and speedtest1 comparisons, a curated DuckDB/H2O SQL
+  workload suite, and durable-operation, paging and worker-latency benchmarks.
+  References and adaptations retain their source pins and license notices.

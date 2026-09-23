@@ -235,7 +235,7 @@ values. Filtering the result cannot turn a matched row into an unmatched row.
 
 `on`, output expressions and filters all bind before execution, including on
 empty input and LIMIT 0. General joins normally materialize joined rows; eligible
-inner scans instead retain borrowed matched pairs as described below. Indexed
+inner scans instead retain borrowed matched pairs. Indexed
 column-equality inner joins retain the existing path. SQL-specific coercion stays
 outside this API. The shared row comparator serves DISTINCT, sets, grouping and
 DISTINCT aggregate state, so extension ordering uses one contract throughout.
@@ -255,145 +255,42 @@ Unreferenced definitions are not evaluated, and LIMIT 0 binds shapes without
 running their row expressions. Recursive dependencies are rejected. This is an
 execution-local relation stage, not a stored view or schema mutation.
 
+## Repeatable execution and resource costs
+
 `Query::repeatable` is false by default. Setting it promises that the query,
 including callbacks and domain operations, has no side effects and produces the
-same results within the current snapshot. Successful uncorrelated membership
-query results can then be cached lazily for the lifetime of their bound expression;
-comparison against each needle normally executes through the registered equality
-function. An equality provider may explicitly opt into a prepared membership
-lookup; see the extension contract. Bound caches never cross
-execution or snapshot boundaries. Repeatable grouped membership and integer-key
-inner joins also permit the bounded plans described in the
-[SQL planning contract](sql.md#safe-join-planning). Arbitrary callbacks retain the
-default path unless the caller explicitly supplies this promise.
+same results within its snapshot. This permits reuse of successful scalar,
+predicate and subquery results. Errors are not cached, conditional branches remain
+lazy, and caches never cross execution or snapshot boundaries. An equality
+provider can also opt into prepared membership lookup under the
+[extension contract](extensions.md).
 
-Repeatable Cartesian scans can reuse successful leading left-only WHERE
-predicates for subsequent right rows. They stay at their original evaluation
-position; UNKNOWN and later errors remain observable. Reuse ends at the first
-right-dependent predicate, includes subquery captures in dependency checks, and
-never crosses a scan or snapshot boundary.
+Repeatable scalar and EXISTS subqueries with integer captures can cache up to
+4,096 successful results per bound expression before clearing the cache. NULL
+captures have their own key. Entry counts are bounded; retained value sizes depend
+on the input. Repeated expressions need not invoke a callback the same number of
+times as a nonrepeatable query. Arbitrary SQL callbacks do not opt in automatically.
 
-Single-key repeatable grouping uses a hash lookup when the key layout is `i64`
-and the provider certifies `native_ops`. NULL has its own group. Aggregate inputs
-retain their arrival order, and groups are sorted before aggregate finalization
-to preserve key/finish order. Other keys and custom providers retain ordered
-lookup.
+Equality joins can use primary/ordered indexes or query-local hash lookups for
+matching native-certified i64, i128, REAL and TEXT keys. Providers with custom
+comparison semantics retain their registered behavior. Building a lookup can take
+work and memory proportional to its right input even with a small positive LIMIT.
+Duplicate matches retain source order. General ON joins preserve NULL candidates,
+UNKNOWN evaluation and subsequent errors; a candidate lookup does not replace the
+complete ON predicate.
 
-A bounded disjunctive-join rule handles two-table Cartesian inner joins when
-every top-level OR arm starts with the same native i64 column equality.
-It preserves FROM order and the entire WHERE predicate, while using the equality
-to avoid materializing mismatched pairs. Reversed equality operands are accepted.
-The rule checks the current snapshot and falls back if either key contains NULL:
-UNKNOWN can still evaluate later expressions, so discarding those pairs could
-suppress errors or callbacks. Predicates preceding the key, differing keys,
-non-integer keys, outer joins, ON predicates and source filters retain the
-existing paths. LIMIT 0 binds without scanning. The resulting equality join uses
-the native integer lookup described below.
+Safe predicate filtering and column selection may reduce intermediate state while
+preserving the documented join order, NULL handling and errors. CoreSQL does not
+provide arbitrary join reordering or a statistics-based cost optimizer. See
+[SQL planning](sql.md#safe-join-planning) for supported query forms.
 
-Unindexed, native-integer equality inner joins use a query-local hash lookup
-of the right-hand input. Existing ordered and primary indexes take precedence.
-The lookup is built on the first non-NULL left key; LIMIT 0, an empty left input,
-or exclusively NULL left keys do not build it. NULL right keys do not enter the
-lookup. Buckets retain right-side scan order and probes retain left-side scan
-order, including duplicate keys. Right rows are borrowed from the query snapshot;
-the lookup is destroyed at query completion and is never shared across queries
-or stored durably. Building it requires O(right input rows) work and memory even
-when a small positive LIMIT needs only a few matches. Other domains, Cartesian
-joins, and general/outer joins keep their existing execution paths.
-
-Repeatable multi-table inner joins can also prune rows using a leading AND prefix
-of matching native integer/real/text column/literal comparisons. Available comparisons run during
-base scanning and each join stage, before rows enter the next materialized table.
-Only FALSE is rejected: UNKNOWN survives so that later WHERE expressions can
-still execute or fail. The full final WHERE, join order, duplicate multiplicity
-and projection order remain unchanged. Nested AND groups are traversed in order;
-a function, subquery, OR, other domain or other predicate shape ends the prefix.
-Existing source/right filters, general ON conditions and outer/non-integer joins
-retain their prior paths. LIMIT 0 still validates without evaluating rows. This
-is intermediate-row pruning, not a general join-order optimizer.
-
-Repeatable inner-join chains with explicit projections can pass their final
-Cartesian/native-integer join directly to the normal filter/project/group path.
-This avoids materializing its unfiltered row pairs. It retains join/WHERE order
-and leaves general ON conditions and outer joins on their existing paths. A
-right-side filter completes eagerly before the final join streams. Earlier join
-stages still materialize.
-
-Repeatable scalar and EXISTS subqueries with integer captures (including no
-captures) cache successful results per bound expression. NULL captures have their
-own key; errors are never cached. The cache clears at 4,096 entries, so entry count
-is bounded, while value sizes remain input-dependent. It never crosses statements
-or snapshots. Arbitrary SQL callbacks do not opt in.
-
-A single-table repeatable subquery beginning with native integer column/parameter
-equality may build a lazy candidate index. Matching rows and NULL-key rows retain
-original order and row identity; a NULL parameter uses the full scan. The complete
-WHERE still executes. Candidate tables use private names so nested queries keep
-seeing the original full table. Broad candidate sets use the original scan.
-
-Eligible repeatable two-source chains can also bypass the left-input copy and use
-the original snapshot rows directly. This requires an explicit projection, no
-source/right filters or general ON, and a Cartesian/native-key inner join.
-The full query shape is still validated before execution; row order and LIMIT
-behavior are unchanged.
-
-Safe local prefixes can filter each input into a private subset before joining.
-Private input/correlation subsets retain immutable source chunks and store ordered
-row locations rather than copying rows. Scans and join/correlation lookups honor
-those selections; physical indexes are not inherited. Row IDs and snapshot
-lifetimes remain unchanged.
-FALSE rows are removed, UNKNOWN rows retained, and original sources remain visible
-to nested queries. A known-empty right input skips the left scan after complete
-shape validation. Eligible repeatable chains also project only columns needed by later
-joins, WHERE, grouping, ordering, output and correlated captures into intermediate
-tables. These changes preserve source order; this is not arbitrary join reordering.
-
-General and outer ON joins can use a lazy key candidate lookup when the first ON
-conjunct is equality between matching native-certified i64, i128, REAL or TEXT
-columns on opposite sides.
-The complete ON still determines matches. NULL right keys remain candidates and
-a NULL left key scans all right rows, preserving UNKNOWN and subsequent errors.
-Candidate order, duplicates and unmatched-row emission remain unchanged. A
-callback before the key, other operators and other domains keep the nested scan.
-
-General/outer joins also retain only columns needed by their final WHERE,
-projection, grouping, ordering and correlated captures when the projection is
-explicit. The complete ON uses borrowed original rows before materialization;
-pruning columns does not move predicate or callback evaluation.
-
-
-Repeatable right-side join filters retain immutable chunks and an ordered row
-selection instead of copying every filtered value. The entire filter completes
-before ON or final WHERE, including when the left input is empty. A private name
-preserves the original source for nested subqueries; physical indexes are not
-inherited by the view. Nonrepeatable filtering keeps its materialized schedule.
-
-For an eligible repeatable inner join with a top-level OR, input pruning may use
-an alternative of local guards, one from each arm's safe native comparison
-prefix. Every arm must supply a guard for the input being narrowed. Only rows
-for which all alternatives are FALSE are discarded; UNKNOWN stays eligible.
-The full WHERE remains in place. A potentially failing operation terminates each
-prefix, so later guards cannot suppress it.
-
-Repeatable scan projections may lazily share identical scalar call results within
-one projected row. Conditional branches retain first-demand evaluation, failures
-are not cached, and predicates/sorts/separate executions do not share these slots.
-Group lookup borrows incoming keys until a new group needs an owned key.
-
-General inner ON joins without grouping, aggregates, DISTINCT or explicit index
-search retain matched pairs as borrowed row references for the final scan. All
-ON evaluation completes before WHERE, ordering and projection begin, including
-when LIMIT is small. The complete ON predicate and NULL candidates are preserved.
-References stay within the retained query snapshot; returned rows own their
-values. Other general/outer joins continue to materialize their intermediate rows.
-
-### Native-key join lookup
-
-Equality joins can build query-local hash lookups for matching native-certified
-i64, i128, REAL and TEXT keys. Duplicate matches retain right-input order and
-borrow keys from the immutable query snapshot. General ON joins only use a
-leading equality; NULL candidates retain UNKNOWN evaluation and callback order.
-Providers without the native-semantics certificate retain the nested fallback.
+Materialized general inner ON joins finish ON evaluation before WHERE, ordering
+and projection, including with a small LIMIT. Right-side join filters also complete
+before ON or final WHERE, even for an empty left input. Query results own their
+values. Intermediate matches, hash lookups and subquery caches can retain
+substantial memory or pin input pages. Use the
+[execution controls](execution.md) and distinguish materialized execution from
+streaming, whose projection/error timing follows row delivery.
 
 ## Composite range selection and mutation results
 

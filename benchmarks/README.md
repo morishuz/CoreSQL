@@ -4,7 +4,7 @@ Benchmark tools are optional and do not link SQLite or DuckDB into CoreSQL.
 Use equivalent inputs, disclose adaptations and check answers before making
 performance claims. In-memory commits do not measure durable write performance.
 
-- [Durable operations and landmark-memory pilot](operational.md)
+- [Durable operations and landmark-memory example](operational.md)
 - [Combined public SQL suite: speedtest1, DuckDB micro, H2O and TPC-H](suite/README.md)
 - [TPC-H Q1–Q22: setup, validation and measurement](tpch/README.md)
 - [Retained September 15, 2026 comparison](tpch/results/OPTIMIZATION_ROUND2.md)

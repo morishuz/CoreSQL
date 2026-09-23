@@ -1,6 +1,6 @@
 # Operational workload measurements
 
-`coresql_operational_profile` measures the landmark-memory pilot on synchronized
+`coresql_operational_profile` measures the landmark-memory example on synchronized
 local storage. Use the [pinned reference setup](reference/README.md) and enable
 `CORESQL_BENCHMARKS` when building. Run each size in a fresh process, serially with
 other benchmarks and after all builds/tests have finished:
@@ -27,7 +27,7 @@ against an independent arithmetic oracle; writes, retained snapshots, reopening
 and backup are checked for their expected contents. `integrity_check` remains
 outside timing. The fixture and oracle are in
 `examples/landmark_memory/workload.hpp`; schema and model interpretation are
-described in the [pilot contract](../docs/applications/landmark-memory.md).
+described in the [example contract](../docs/applications/landmark-memory.md).
 
 The CSV contains operation, input row count, trial, milliseconds, process peak RSS
 and current main-file size. RSS is the cumulative process high-water mark,
@@ -66,7 +66,7 @@ Each trial verifies its aggregate answer and reports cache hit/miss counts.
 The switch disables cache insertion as well as lookup; the comparison does not
 artificially build and discard a cached entry on every uncached call. Core binding
 still runs for every execution; template reuse does not eliminate that overhead.
-Caching is opt-in. The template now accepts changing parameter values with the same
+Caching is opt-in. The template accepts changing parameter values with the same
 types and NULL shape; this comparison must be rerun when cache semantics change.
 
 The worker soak seeds 1,000 fixed-size descriptors by default (the optional second
@@ -90,7 +90,7 @@ This verifies 4,096 writes and 8,192 exact searches per phase using the same
 unbatched/explicit maintenance, batched/explicit maintenance, immediate periodic
 checkpoints, idle-deferred periodic checkpoints, background checkpoints with two
 snapshot readers, and the same background configuration with a 16 MiB page cache.
-The four original controls use serial reads and resident rows. All phases retain
+The four serial controls keep rows resident. All phases retain
 synchronized commits. Explicit-maintenance and background phases can still
 encounter synchronous core log-size checkpoints.
 The CSV contains raw queue, execution, shared commit and total latency samples;

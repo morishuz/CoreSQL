@@ -34,15 +34,14 @@ Set `-DCORESQL_MAX_ENCODED_MIB=2048` at configuration time to select another bou
 This is an admission limit, not a tested memory budget or a throughput guarantee.
 The on-disk log can be larger because it retains recent history.
 
-By default, rows and indexes stay in RAM. Optional paging can store decoded row
-chunks and a native INTEGER primary-key image on disk; other indexes stay
-resident. Checkpointing allocates a complete encoded image;
-backup/restore, query results and retained transaction snapshots can add further
-copies. The regression suite exercises 72 MiB of row payload, beyond the former
-64 MiB boundary, including checkpoint, reopen, backup and snapshot restore. It does
-not certify comfortable operation at every configurable limit. Measure your actual
-workload and leave RAM headroom before increasing the bound. Smaller builds reject
-oversize files; they must never silently truncate them to meet the limit.
+By default, rows and indexes stay in RAM. Optional paging can store row chunks
+and a native INTEGER primary-key lookup image on disk; other indexes stay resident.
+Checkpoints and native backups stream their encoded output. Ordinary commit
+records and snapshot exports still materialize encoded output; queries and retained
+snapshots add further memory costs. Neither the page-cache target nor the
+encoded-size limit caps total process memory. Measure your workload and leave RAM
+headroom before increasing either setting. Smaller builds reject oversize files;
+they do not truncate them to meet the limit.
 
 ## Backup and restore
 

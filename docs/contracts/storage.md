@@ -150,7 +150,7 @@ latency. This is not a hard real-time durability protocol.
 
 Both old and replacement files remain exclusively locked across publication.
 An opener checks that its locked inode still matches the pathname, so a paused
-opener cannot return an obsolete database after a checkpoint. Recovery removes an
+opener cannot return an obsolete database after a checkpoint. Recovery removes
 unpublished checkpoint siblings left by an interrupted owner. Both sibling names
 are reserved: do not put application files there. Do not access the database through
 hard-link aliases, externally rename/modify an open file, or reuse inherited
@@ -158,8 +158,8 @@ handles after `fork`. Transaction and SQL connection objects require external
 serialization; independently captured read snapshots can run concurrently when
 `OpenOptions::concurrent_reads` explicitly certifies the installed callbacks and
 index providers. Durable commits and checkpoint publication are internally
-serialized. The implementation
-is tested on macOS; Linux support is not yet exercised in this workspace.
+serialized. Supported platforms and build requirements are listed in
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Formats and migration
 
@@ -193,34 +193,6 @@ core-created unique indexes with the same reserved prefix. New core indexes may
 use that prefix without acquiring constraint ownership. SQL still reserves it
 for its generated names.
 
-## Tests
-
-`durable_recovery` covers all byte truncation points in a final change record,
-real child-process exits at append boundaries, injected failures, corruption,
-checkpoint creation/sync/rename/directory-sync interruptions, automatic history
-reclamation, lock retention, and the stale-inode opener race.
-
-`background_checkpoints` gates a checkpoint thread before encoding and after its
-first tail copy, commits concurrently, and verifies reopening retains those commits.
-It checks repeated catch-up, synchronous/schema supersession, reservation cancellation,
-unpublished failures, publication failures, and child-process exits at every
-background phase after a subsequent commit was acknowledged.
-
-`paging` uses a logical working set over 100 times the decoded cache target and
-checks on-demand lookup/scan loads, eviction, cursor pins, retained snapshots after
-owner close, checkpoint/reopen, disk index overlay compaction, optional-image
-reuse/corruption fallback and scratch extent reuse across repeated updates.
-
-`chunk_snapshots` checks a single-row write-size bound, old snapshots, cross-chunk
-mutation failure, deterministic randomized update/delete/insert/rollback against
-an independent row model, empty chunks, large values, checkpoint/reopen cycles,
-and snapshot export/import. Existing core and add-on contracts run unchanged.
-
-`primary_keys` checks atomic uniqueness, cross-chunk key swaps, native key
-semantics, old snapshots, randomized mutations with rollback/checkpoint/reopen,
-legacy snapshot/change decoding, and duplicate-key recovery rejection. The
-document application's crash tests exercise a keyed table too.
-
 ## Unconditional clear and join snapshots
 
 `erase(table)` without a filter stages empty chunk/index structures and retains
@@ -231,10 +203,7 @@ freed, and durable publication still performs storage work. The fast clear path
 applies to unconditional erasure only, not arbitrary predicates.
 
 A join reads both tables from the same retained state. Its intermediate row-pair
-references never escape the query; returned values own their data. Recovery tests
-cover clear interruptions before/after the commit marker, clear/reinsert, retained
-snapshots, and checkpoint/reopening.
-
+references never escape the query; returned values own their data.
 
 ## Extension index declarations
 
@@ -266,7 +235,6 @@ and composite indexes retain their existing in-memory implementations and rebuil
 costs. Recovery still validates the durable rows and checks cached mappings. A valid image
 avoids reconstructing and sorting the index, not those validation passes; measure
 reopening time rather than assuming reuse is faster. See [extension ownership](extensions.md).
-
 
 ## Schema evolution and row identity
 
@@ -316,12 +284,12 @@ the source and retry to a fresh path. See [backup and upgrade guide](../usage.md
 
 ## Persistent constraints
 
-CORESQL6/CORECHG7 add named CHECK expression trees and foreign-key declarations to
-table descriptors. CHECK stores logical scalar operations, literal types/values and
+Current table descriptors persist named CHECK expression trees and foreign-key
+declarations. CHECK stores logical scalar operations, literal types/values and
 column names, never SQL text or callback addresses. Readers bound nesting and node
 counts and validate the resulting expressions. Required type and function providers
 must be registered before opening. Foreign keys name explicit columns and tables;
 indexes are rebuilt before recovery validates all constraints against the recovered
 state. Invalid constraints or rows prevent opening rather than silently disabling
-checks. Older binaries cannot read these new records; retain verified backups before
-upgrading. CORELOG2 framing and synchronized commit publication are unchanged.
+checks. See [formats and migration](#formats-and-migration) before upgrading.
+CORELOG2 framing and synchronized commit publication are unchanged.

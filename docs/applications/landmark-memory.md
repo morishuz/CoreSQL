@@ -1,7 +1,7 @@
-# Landmark-memory pilot
+# Landmark-memory example
 
-This pilot explores CoreSQL as a persistent, process-local memory for a robot.
-It stores derived observations, not raw camera/video or LiDAR streams. The first
+This example uses CoreSQL as a persistent, process-local memory for a robot.
+It stores derived observations, not raw camera/video or LiDAR streams. The synthetic
 workload is replayable without hardware or a machine-learning runtime.
 
 ## Where it fits
@@ -14,7 +14,7 @@ workload is replayable without hardware or a machine-learning runtime.
 5. The application verifies candidates using its own geometric/perception logic.
 
 Database results must not directly command steering, braking or actuators. This
-pilot does not implement perception, localization, sensor fusion, route planning
+example does not implement perception, localization, sensor fusion, route planning
 or a safety controller. Search and persistence have no hard real-time deadline or
 worst-case latency guarantee. Keep database work off the control thread; deployment
 requires application-specific scheduling, queue bounds and measurements on the
@@ -36,12 +36,10 @@ accuracy. Production ingestion must record coordinate-frame and model-version
 identities and obtain descriptors from the application. Multiple coordinate frames
 must not be mixed using the fixture's single-frame schema.
 
-The pilot verifies exact nearest candidates against an independent C++ distance
+The executable verifies exact nearest candidates against an independent C++ distance
 calculation, including deterministic ID ordering for ties. It also checks retained
-snapshot visibility, durable reopening and native backup. Tests exercise invalid
-vector dimensions, statement atomicity and rollback of a staged observation removal.
-Vector search currently scans the filtered candidates; it is not an approximate
-nearest-neighbor index. Measure its scaling before selecting an ANN implementation.
+snapshot visibility, durable reopening and native backup. Vector search scans the
+filtered candidates; it is not an approximate nearest-neighbor index. Measure its scaling against your application workload.
 
 ```sh
 cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
@@ -50,9 +48,9 @@ cmake --build build/release --target coresql_landmark_memory -j 4
 ctest --test-dir build/release -R landmark_memory --output-on-failure
 ```
 
-## Acceptance boundary
+## Limits
 
-The initial engineering profiles use 1,000 and 10,000 stored landmarks; the
+The benchmark profiles use 1,000 and 10,000 stored landmarks; the
 operational runner accepts up to 100,000. Each file has one owner. The worker
 serializes mutations and dispatches committed snapshots to reader threads; periodic
 checkpoints can encode concurrently. Paging is available, but metadata, indexes,
@@ -69,13 +67,11 @@ See the [operational measurement method](../../benchmarks/operational.md).
 
 ## Bounded worker
 
-The pilot retains at most 100,000 live 128-dimensional landmarks, with a provisional
-1 GiB process budget to validate on deployment hardware. The default decoded-chunk
-cache target is 64 MiB (`page_cache_bytes`); zero selects resident rows. Paging can
-release clean row chunks, but the composite retrieval index, metadata, query buffers,
-retained snapshots and active pins consume additional memory. The process budget
-is a target, not an allocator-enforced ceiling. Unbounded observation history and
-silent retention eviction remain outside this application contract.
+The worker accepts at most 100,000 live 128-dimensional landmarks. Its default
+decoded-chunk cache target is 64 MiB (`page_cache_bytes`); zero selects resident
+rows. The retrieval index, metadata, query buffers, retained snapshots and active
+pins consume additional memory, so the cache target is not a process-memory cap.
+Retention is explicit; acknowledged observations are never silently evicted.
 
 `examples/landmark_memory/worker.hpp` provides a concrete application worker in
 addition to the standalone fixture. One owner thread manages a dedicated persistent
@@ -141,21 +137,6 @@ nor reader concurrency guarantees a retrieval deadline. Shutdown drains accepted
 writes and searches, waits for maintenance and joins all threads; I/O can delay it.
 The database and registry remain alive until accepted work has completed.
 Applications must externally coordinate worker destruction with producers.
-
-## Reliability evidence and deployment gate
-
-The worker test covers capacity rejection, durable updates, pruning, separate model
-and frame spaces, cancelled reads, reopening and draining accepted writes at
-shutdown. `coresql_landmark_soak` adds repeated ingest/prune/search cycles over a
-1,000-row fixture, bursts exercising queue backpressure, ten reopenings, and a final
-full sequence/count check. It reports process peak RSS and file size over time.
-Run it alongside the larger operational size sweep; its small active map is a
-repeated-operation test, not a substitute for the 100,000-row memory profile.
-
-Before deploying on a robot, repeat the profiles and fault tests on the target
-hardware/filesystem, set application latency and retention requirements, and run
-for the intended mission duration. Synthetic tests and process termination do not
-establish power-loss behavior of a particular device or perception accuracy.
 
 ## Write coalescing and diagnostics
 

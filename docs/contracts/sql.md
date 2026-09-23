@@ -60,8 +60,9 @@ in the [execution contract](execution.md). `Connection::cursor(statement, parame
 options)` returns a move-only cursor with `next()`, `fetch(max_rows)`, `columns()`,
 `stats()` and `close()`. It retains its input snapshot across fetches and returns
 owned, unpacked SQL values. Single-table scans, source-free SELECT, OFFSET,
-UNION ALL, and one INNER/LEFT/CROSS join are supported; blocking operators such as
-ORDER BY, grouping and DISTINCT still require materialized execution.
+UNION ALL, one or two INNER/LEFT/CROSS joins, and single-table ORDER BY with a
+matching ordered index are supported. Other ordering, grouping and DISTINCT
+require materialized execution.
 `Result::columns` contains SELECT output names, including for empty results; explicit AS wins, then
 the source column name, then `column1`, `column2`, etc. for unnamed expressions.
 
@@ -139,8 +140,8 @@ Constraints apply to native writes as well as SQL and survive savepoints,
 checkpointing and reopening. Constraint names label declarations; they do not
 introduce a DROP CONSTRAINT operation.
 
-Composite keys use protected native unique indexes and column nullability, with
-no new storage format. A single-column table-level primary key has the same
+Composite keys use protected native unique indexes and column nullability. A
+single-column table-level primary key has the same
 behavior as an inline primary key, including INTEGER key generation. Composite
 keys have no generated component or composite-key `rowid` alias.
 
@@ -191,8 +192,8 @@ skipped rows produce no result and no change count. Multi-row operations remain
 statement-atomic, including a failure in a later update. UPDATE preserves identity
 and does not perform REPLACE's delete/insert behavior.
 
-The initial UPSERT syntax supports VALUES and DEFAULT VALUES, one conflict clause,
-and the existing column-only RETURNING forms. INSERT SELECT with UPSERT, partial
+UPSERT syntax supports VALUES and DEFAULT VALUES, one conflict clause,
+and column/star RETURNING forms. INSERT SELECT with UPSERT, partial
 conflict targets, subqueries in the update clause and REPLACE plus ON CONFLICT are
 rejected.
 

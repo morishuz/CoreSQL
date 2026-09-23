@@ -137,9 +137,9 @@ schema of the existing `coresql_documents` application.
 
 `coresql_landmark_memory NEW_DIRECTORY` demonstrates background storage and exact
 vector retrieval of synthetic robot landmarks, with snapshot, durable-reopen and
-backup verification. See the [pilot contract](../docs/applications/landmark-memory.md).
+backup verification. See the [example contract](../docs/applications/landmark-memory.md).
 
-The landmark pilot also supplies a bounded background worker in
+The landmark example also supplies a bounded background worker in
 [`landmark_memory/worker.hpp`](landmark_memory/worker.hpp), with explicit admission,
 model/frame filtering, durable acknowledgement and pruning. See its
 [application contract](../docs/applications/landmark-memory.md).

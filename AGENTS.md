@@ -23,6 +23,8 @@ docs/architecture/direction.md for its contract and priorities.
   explicit owner approval.
 - Keep temporary audit notes, profiles and intermediate benchmark results out of
   the tracked source tree. Public documentation should describe the product, its
-  contracts, reproducible methods or required attribution.
+  contracts, reproducible methods or required attribution. Do not publish internal
+  review transcripts, refactoring diaries, agent handoffs or local workspace notes.
+  Audit documentation and artifacts for public relevance before committing or pushing.
 
 See CONTRIBUTING.md for build options, installation checks and CI.

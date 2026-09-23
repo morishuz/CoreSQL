@@ -46,31 +46,22 @@ still validates rows and cached mappings. Neither paging nor cached indexes impo
 a total RAM ceiling or guarantee faster reopening.
 
 Resumable cursors cover scans, OFFSET, UNION ALL, ordered index order, and one or
-two INNER/LEFT/CROSS joins.
-Blocking operators and many joins still materialize state; accounted query-buffer
+two INNER/LEFT/CROSS joins. Blocking operators and many joins still materialize state; accounted query-buffer
 limits can fail an operation before further tracked growth, but there is no disk
 spilling or strict allocator budget. See the [execution contract](../contracts/execution.md)
 for supported shapes, lifetime rules and memory exclusions.
 
-The [landmark-memory pilot](../applications/landmark-memory.md) bounds its logical
-map at 100,000 128-dimensional landmarks. Its worker uses one writer, two snapshot
-readers by default, a 64 MiB decoded-chunk target and background checkpoints. The
-provisional 1 GiB process budget remains a deployment measurement target, not an
-enforced ceiling. General persisted index pages, external-memory operators and
-predictable storage latency remain further work. Ordered index cursors stream a
-matching ORDER BY without sorting.
-Preserve logical query interfaces and snapshot-local row identities as storage
-and execution evolve.
+The [landmark-memory example](../applications/landmark-memory.md) combines these
+APIs with bounded ingestion, exact vector retrieval and explicit retention.
+General persisted index pages, external-memory query operators and hard latency
+bounds are not implemented.
 
-## Development priorities
+## Scope
 
-Keep semantics explicit, preserve meaningful diagnostics, and add regression
-coverage for atomicity, error ordering, NULLs and borrowed-value lifetimes.
-Domain-specific features should demonstrate useful composition without engine
-specialization; [JSON](../extensions/json.md) and [graph](../extensions/graph.md)
-are examples, not proof that every extension workload is covered.
+Domain-specific extensions compose through the public interfaces. See the
+[JSON](../extensions/json.md) and [graph](../extensions/graph.md) examples.
 
-Use concrete application needs to choose work from the [SQL backlog](sql-roadmap.md).
+See [SQL coverage and limitations](sql-roadmap.md) before choosing query forms.
 Measure equivalent inputs and durability settings before claiming performance
 improvements. [Benchmark tooling](../../benchmarks/README.md) keeps SQLite as an
 external reference, never the CoreSQL implementation or a runtime dependency.

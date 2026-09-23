@@ -58,8 +58,8 @@ scripts or reads standard input. Ordinary builds fetch no dependencies.
 For C++ integration, use `CoreSQL::core` or `CoreSQL::sql` through CMake;
 [installation and examples](docs/usage.md) cover the complete workflow.
 
-The current application pilot is a [bounded landmark memory](docs/applications/landmark-memory.md)
-with a background worker, durable acknowledgements and exact vector retrieval.
+The [bounded landmark-memory example](docs/applications/landmark-memory.md)
+provides a background worker, durable acknowledgements and exact vector retrieval.
 See [execution controls](docs/contracts/execution.md) for cooperative cancellation
 and callback scan streaming.
 

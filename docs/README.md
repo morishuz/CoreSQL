@@ -7,6 +7,8 @@
 - [Executable examples](../examples/README.md)
 - [SQL dialect](contracts/sql.md)
 - [Relational C++ API](contracts/relational.md)
+- [Streaming cursors and query controls](contracts/execution.md)
+- [Concurrent snapshots and readers](contracts/concurrency.md)
 - [Storage and durability](contracts/storage.md)
 
 ## Extend CoreSQL
@@ -20,6 +22,6 @@
 
 - [Contributing](../CONTRIBUTING.md)
 - [Architecture](architecture/direction.md)
-- [SQL backlog](architecture/sql-roadmap.md)
+- [SQL coverage and limitations](architecture/sql-roadmap.md)
 - [Benchmark methods and reproduction](../benchmarks/README.md)
 - [Sources and attribution](../PROVENANCE.md)

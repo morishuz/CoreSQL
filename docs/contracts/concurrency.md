@@ -58,13 +58,3 @@ request in its FIFO queue, after preceding writes commit. Reader completion can
 be out of order, and later writes may proceed while an earlier reader computes.
 An explicit checkpoint drains preceding readers and waits for pending maintenance.
 Shutdown drains accepted reads and writes and observes background failures.
-
-## Validation
-
-`concurrent_snapshots` checks consistent multi-row views during durable writes,
-retained views after owner destruction, stale writers and background checkpoints.
-`background_checkpoints` exercises commits during encoding/catch-up, schema
-supersession and failures/crashes around publication. The separate
-`CORESQL_THREAD_SANITIZER` build checks concurrent paths without combining thread
-and address sanitizers. Synthetic tests do not establish hard real-time bounds or
-storage-device power-loss behavior.
