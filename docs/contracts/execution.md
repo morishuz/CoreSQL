@@ -82,7 +82,10 @@ column/literal filters it can also seek past leading index columns fixed by
 non-null equalities and bound the next column's range. This path preserves scan
 order within complete ORDER BY tie groups; tie buffers count toward the query
 buffer limit. Unsupported orderings are rejected instead of fully sorting.
-Other filters use resumable chunk traversal. One or
+Eligible ordered cursors can return indexed values without fetching table rows;
+missing columns or logical row identity fetch the row lazily. Index traversal and
+tie buffers retain their snapshot across fetch calls and obey work, cancellation
+and buffer limits. Other filters use resumable chunk traversal. One or
 two joins use nested loops and retain only the current input pins. Longer join
 pipelines, blocking cursor operators and disk spilling are not implemented.
 

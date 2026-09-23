@@ -122,7 +122,7 @@ struct QueryCounters {
     std::size_t rows_tested = 0, candidate_pairs = 0, intermediate_rows = 0;
     std::size_t largest_intermediate = 0, subquery_executions = 0;
     std::size_t hash_build_rows = 0, hash_probes = 0;
-    std::size_t ordered_entries = 0;
+    std::size_t ordered_entries = 0, ordered_row_fetches = 0;
     std::size_t correlation_index_rows = 0, subquery_cache_hits = 0;
 };
 extern thread_local QueryCounters* active_query_counters;

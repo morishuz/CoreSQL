@@ -2,6 +2,7 @@
 #include "index.hpp"
 #include "ordered_index.hpp"
 #include "ordered_scan.hpp"
+#include "index_row.hpp"
 #include "scan.hpp"
 #include <array>
 #include <coroutine>
@@ -322,7 +323,7 @@ StreamPlan bind_stream(const Tables& tables, const Query& query, const Registry&
     for (const auto& expression : plan.projection)
         plan.types.push_back(expression.type);
     if (!query.order_by.empty()) {
-        plan.ordered = ordered_scan_plan(left, query, plan.where, registry);
+        plan.ordered = ordered_scan_plan(left, query, plan.where, registry, plan.projection);
         if (!plan.ordered)
             plan.order = matching_order(left, query, plan.reverse_order);
     }
@@ -340,7 +341,7 @@ StreamPlan bind_tree(const Tables& tables, const Query& query, const Registry& r
     return plan;
 }
 Generator<Row> scan(const Tables&, const Query&, const Registry& registry, StreamPlan plan) {
-    auto project = [&](const Parts& row) -> std::optional<Row> {
+    auto project = [&](const auto& row) -> std::optional<Row> {
         query_step();
 #ifdef CORESQL_TESTING
         if (auto* counters = detail::active_query_counters)
@@ -379,12 +380,8 @@ Generator<Row> scan(const Tables&, const Query&, const Registry& registry, Strea
                 // No QueryBuffer may survive co_yield and retain a stale control.
                 QueryBuffer memory;
                 memory.add(scan.buffer_bytes());
-                auto pinned = indexed_row(*plan.left, entry->location);
-#ifdef CORESQL_TESTING
-                ++detail::visited_chunks();
-#endif
-                output =
-                    project(part(pinned.chunk->rows[pinned.position], pinned.chunk->rowids[pinned.position]));
+                IndexRow row(*plan.left, *entry, plan.ordered->row_columns);
+                output = project(row);
                 if (output)
                     memory.add_row(*output, sizeof(Row));
             }

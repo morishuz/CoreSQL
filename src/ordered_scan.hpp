@@ -7,13 +7,14 @@ struct OrderedScanPlan {
     const OrderedIndex* index = nullptr;
     OrderedIndex::Bounds bounds;
     bool reverse = false;
-    std::vector<std::size_t> order_columns;
+    std::vector<std::size_t> order_columns, row_columns;
     std::vector<Comparison> comparisons;
 };
 // Only total native predicates and column orderings may stop a materialized
 // scan early: repeatability alone does not certify the absence of errors.
 std::optional<OrderedScanPlan> ordered_scan_plan(const Table&, const Query&,
-                                                 const std::optional<BoundPredicate>&, const Registry&);
+                                                 const std::optional<BoundPredicate>&, const Registry&,
+                                                 std::span<const BoundExpr> projection);
 
 // Shares bounded traversal and stable ORDER BY ties across both executors.
 // Account retained storage inside each call, never across coroutine suspension.

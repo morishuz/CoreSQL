@@ -6,6 +6,7 @@
 #include "projection_cache.hpp"
 #include "predicate_reuse.hpp"
 #include "ordered_scan.hpp"
+#include "index_row.hpp"
 
 namespace coresql::detail::execution {
 Result run_scan(const Tables& tables, const Query& query, const Registry& registry,
@@ -101,16 +102,14 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
     if (query.limit == 0 || (scope.right && scope.right->row_count == 0))
         return result;
     if (!scope.right && !query.search && !input_rows && !consumer && !visitor && !early)
-        if (auto plan = ordered_scan_plan(table, query, predicate, registry)) {
+        if (auto plan = ordered_scan_plan(table, query, predicate, registry, projection)) {
             OrderedScan scan(table, *plan);
             QueryBuffer output_memory;
             while (auto entry = scan.next()) {
                 QueryBuffer traversal_memory;
                 traversal_memory.add(scan.buffer_bytes());
-                auto pinned = indexed_row(table, entry->location);
-                RowView row(pinned.chunk->rows[pinned.position], pinned.chunk->rowids[pinned.position]);
+                IndexRow row(table, *entry, plan->row_columns);
 #ifdef CORESQL_TESTING
-                ++detail::visited_chunks();
                 if (auto* counters = detail::active_query_counters)
                     ++counters->rows_tested;
 #endif

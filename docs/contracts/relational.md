@@ -182,8 +182,18 @@ equalities, and stop after LIMIT qualifying rows. An optional range bounds the
 next index column. Complete boundary tie groups are examined to preserve scan
 order; large tie groups require accounted query-buffer space. OFFSET still
 requires skipping qualifying rows.
-The first owned key stays inline; additional keys use per-match storage. Heavy
-column/literal keys borrow from the immutable snapshot, whereas computed keys
+
+Eligible ordered scans read indexed columns directly from the retained index
+snapshot. A query covered by those columns needs no table-row fetches; other
+columns and logical row identities fetch the row lazily. For example, an index
+on `(device, ts, id)` can cover `SELECT id, ts ... WHERE device = ... ORDER BY ts
+LIMIT ...`. An index on `(device, ts)` does not implicitly contain the primary
+key `id`. Indexed values remain subject to normal mutation, savepoint and recovery
+semantics; covering reads do not change the persistent format.
+
+In the sorting fallback, the first owned key stays inline; additional keys use
+per-match storage. Heavy column/literal keys borrow from the immutable snapshot,
+whereas computed keys
 own their values. This is not a whole-query memory budget.
 
 `choose(branches, otherwise)` supplies generic lazy conditional expressions:

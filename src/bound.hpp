@@ -96,7 +96,9 @@ struct BoundExpr {
     }
     template <class R> Value evaluate_uncached(const R& row, const Registry& registry) const {
         if (kind == Expr::Kind::row_id) {
-            if constexpr (requires { row.id; })
+            if constexpr (requires { row.identity(); })
+                return row.identity();
+            else if constexpr (requires { row.id; })
                 return row.id;
             else
                 fail(ErrorCode::unsupported, "Row identity is only available in query expressions");

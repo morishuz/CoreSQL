@@ -35,8 +35,17 @@ checkout for revision metadata; the executable also works from a source archive.
 The fixture contains 100 devices and configurable event rows with INTEGER primary
 keys, a device ID, increasing INTEGER timestamp, INTEGER value and fixed-size TEXT
 payload. Indexes cover `(device,ts)` and `ts`. Payload contents and query parameters
-are deterministic; every read is checked against an arithmetic oracle. Final
-contents are checked with a single streaming pass after each write phase, then integrity
+are deterministic; every read is checked against an arithmetic oracle.
+
+Pass `--covering-index` to the runner (or append `covering` to the executable's
+arguments) to replace `(device,ts)` with `(device,ts,id)` in **both engines**.
+This optional schema variant allows CoreSQL to return event IDs and timestamps
+entirely from the index. Keep its results separate from the default schema;
+compare memory, ingestion/deletion, checkpoint and reopen costs as well as reads.
+The manifest records the variant. Secondary CoreSQL indexes do not implicitly
+include primary-key columns.
+
+Final contents are checked with a single streaming pass after each write phase, then integrity
 and persistent reopening are checked. Those checks are outside timed intervals.
 They access data and therefore affect subsequent cache state.
 

@@ -28,6 +28,7 @@ struct Workload {
     Backend& engine;
     std::int64_t n, operations, payload;
     std::string only;
+    bool covering;
     std::vector<std::int64_t> values;
     std::int64_t next, expired = 0;
     const std::string point = "SELECT v,body FROM events WHERE id=?";
@@ -40,8 +41,10 @@ struct Workload {
     const std::string range = "SELECT count(*),sum(v) FROM events WHERE ts>=? AND ts<?";
     const std::string join = "SELECT e.id,d.label FROM events AS e JOIN devices AS d ON e.device=d.id WHERE "
                              "e.id>=? AND e.id<? ORDER BY e.id";
-    Workload(Backend& e, std::int64_t rows, std::int64_t ops, std::int64_t bytes, std::string phase)
-        : engine(e), n(rows), operations(ops), payload(bytes), only(std::move(phase)), next(rows) {
+    Workload(Backend& e, std::int64_t rows, std::int64_t ops, std::int64_t bytes, std::string phase,
+             bool covered)
+        : engine(e), n(rows), operations(ops), payload(bytes), only(std::move(phase)), covering(covered),
+          next(rows) {
         values.reserve(static_cast<std::size_t>(rows + ops * 17));
         for (std::int64_t i = 0; i < n; ++i)
             values.push_back(i % 97);
@@ -107,7 +110,8 @@ struct Workload {
                 engine.exec(insert, row(i, values[i]));
             engine.exec("COMMIT");
         }
-        engine.exec("CREATE INDEX events_device_time ON events(device,ts)");
+        engine.exec(covering ? "CREATE INDEX events_device_time ON events(device,ts,id)"
+                             : "CREATE INDEX events_device_time ON events(device,ts)");
         engine.exec("CREATE INDEX events_time ON events(ts)");
         if (engine.durable) {
             engine.checkpoint();
@@ -265,8 +269,11 @@ struct Workload {
 } // namespace
 int main(int argc, char** argv) {
     try {
-        check(argc == 9, "Usage: application ENGINE memory|durable ROWS PAYLOAD_BYTES OPERATIONS CACHE_MIB "
-                         "SCRATCH_DIR PHASE|all");
+        check(argc == 9 || argc == 10,
+              "Usage: application ENGINE memory|durable ROWS PAYLOAD_BYTES OPERATIONS CACHE_MIB "
+              "SCRATCH_DIR PHASE|all [covering]");
+        const bool covering = argc == 10;
+        check(!covering || std::string(argv[9]) == "covering", "Unknown index variant");
         const std::string engine = argv[1], mode = argv[2];
         const auto rows = std::stoll(argv[3]), payload = std::stoll(argv[4]), ops = std::stoll(argv[5]),
                    cache = std::stoll(argv[6]);
@@ -290,7 +297,8 @@ int main(int argc, char** argv) {
                "synchronous checkpoints every 50 mixed transactions\n";
         std::cout << "phase,sample,milliseconds,units,rss_bytes,peak_rss_bytes,file_bytes,core_page_reads,"
                      "core_page_writes,core_written_bytes,core_checkpoints\n";
-        Workload(backend, rows, ops, payload, phase).run();
+        std::cerr << "Event index: " << (covering ? "(device,ts,id)" : "(device,ts)") << '\n';
+        Workload(backend, rows, ops, payload, phase, covering).run();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

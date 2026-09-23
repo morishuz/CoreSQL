@@ -19,7 +19,8 @@ bool collect_keys(const BoundPredicate& predicate, const Table& table, const Reg
 } // namespace
 std::optional<OrderedScanPlan> ordered_scan_plan(const Table& table, const Query& query,
                                                  const std::optional<BoundPredicate>& predicate,
-                                                 const Registry& registry) {
+                                                 const Registry& registry,
+                                                 std::span<const BoundExpr> projection) {
     if (query.order_by.empty() || table.ordered.empty())
         return {};
     std::vector<BoundLeaf> leaves;
@@ -96,7 +97,27 @@ std::optional<OrderedScanPlan> ordered_scan_plan(const Table& table, const Query
         if (!matched)
             continue;
         plan.reverse = reverse.value_or(false);
-        auto score = 1 + plan.bounds.prefix.size() * 2 + (plan.bounds.lower || plan.bounds.upper ? 1 : 0);
+        plan.row_columns.resize(table.columns.size(), std::numeric_limits<std::size_t>::max());
+        for (std::size_t i = 0; i < index->columns.size(); ++i)
+            plan.row_columns[index->columns[i]] = i;
+        auto covered = [&](auto&& self, const BoundExpr& expression) -> bool {
+            if (expression.kind == Expr::Kind::row_id)
+                return false;
+            if (expression.kind == Expr::Kind::column)
+                return plan.row_columns[expression.index] != std::numeric_limits<std::size_t>::max();
+            return std::all_of(expression.arguments.begin(), expression.arguments.end(),
+                               [&](const auto& argument) { return self(self, argument); });
+        };
+        const bool covering =
+            std::all_of(projection.begin(), projection.end(),
+                        [&](const auto& expression) { return covered(covered, expression); }) &&
+            std::all_of(leaves.begin(), leaves.end(),
+                        [&](const auto& leaf) { return covered(covered, leaf.left); });
+        // Prefer coverage when bounds are equally selective; do not discard a
+        // longer equality prefix merely to avoid fetching the surviving rows.
+        auto score =
+            (1 + plan.bounds.prefix.size() * 2 + (plan.bounds.lower || plan.bounds.upper ? 1 : 0)) * 2 +
+            covering;
         if (score > best) {
             best = score;
             chosen = std::move(plan);
