@@ -146,8 +146,12 @@ struct Lowerer {
     Value constant(const Node&) const;
 };
 std::vector<std::size_t> returning_columns(const Statement&, const std::vector<Column>&, Result&);
+struct UpsertPlan {
+    std::vector<std::vector<std::string>> keys;
+};
+UpsertPlan prepare_upsert(Transaction&, const Statement&, const Schema&);
 bool upsert(Transaction&, const Statement&, const Registry&, std::span<const Value>, const TypeAdapters&,
-            Row&);
+            const Schema&, const UpsertPlan&, Row&);
 Result insert(Transaction&, const Statement&, const Registry&, std::span<const Value>, const TypeAdapters&);
 Result execute(Transaction&, const Statement&, const Registry&, std::span<const Value>, const TypeAdapters&);
 } // namespace coresql::sql::detail

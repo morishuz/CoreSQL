@@ -417,6 +417,12 @@ struct Result {
     std::vector<Type> types;
     std::vector<Row> rows;
 };
+// matched counts rows selected before the additional condition; updated counts
+// rows accepted by it, including unchanged values. Returned rows are optional.
+struct UpdateOutcome {
+    std::size_t matched = 0, updated = 0;
+    Result returning;
+};
 // Cooperative execution controls. Work units are implementation-dependent engine
 // operations, not elapsed time or allocation bytes. Native callbacks cannot be preempted.
 struct QueryOptions {
@@ -640,6 +646,8 @@ public:
     std::size_t erase(const std::string& table, std::optional<Predicate> where = {});
     // Return affected rows once, after validation: new rows for UPDATE, old for DELETE.
     Result update_returning(const std::string&, std::vector<Assignment>, std::optional<Predicate> = {});
+    UpdateOutcome update_if(const std::string& table, std::vector<Assignment>, Predicate match,
+                            std::optional<Predicate> condition = {}, bool returning = false);
     Result erase_returning(const std::string&, std::optional<Predicate> = {});
     Result query(const Query&) const;
     Result query(const Query&, const QueryOptions&) const;
@@ -663,7 +671,8 @@ private:
     std::size_t erase_impl(const std::string&, std::optional<Predicate>, std::optional<IndexResult>,
                            std::vector<Row>* returning = nullptr);
     std::size_t update_impl(const std::string&, std::vector<Assignment>, std::optional<Predicate>,
-                            std::vector<Row>*);
+                            std::vector<Row>*, std::size_t* matched = nullptr,
+                            std::optional<Predicate> condition = {});
     // Snapshot import supplies logical IDs without depending on insertion layout.
     void insert_impl(const std::string&, Row, std::optional<std::int64_t>);
     void restore_row_sequence(const std::string&, std::int64_t);

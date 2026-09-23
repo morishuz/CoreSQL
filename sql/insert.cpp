@@ -45,6 +45,7 @@ Result insert(Transaction& tx, const Statement& s, const Registry& registry,
             throw Error(ErrorCode::schema, "Unknown insertion column");
         mapping.push_back(static_cast<std::size_t>(c - columns.begin()));
     }
+    std::optional<UpsertPlan> upsert_plan;
     auto insert = [&](Row input) {
         if (input.size() != (mapping.empty() ? columns.size() : mapping.size()))
             throw Error(ErrorCode::schema, "SQL insertion width differs");
@@ -63,7 +64,9 @@ Result insert(Transaction& tx, const Statement& s, const Registry& registry,
         }
         if (s.conflict != Statement::no_conflict) {
             largest.reset();
-            if (!upsert(tx, s, registry, parameters, adapters, row))
+            if (!upsert_plan)
+                upsert_plan = prepare_upsert(tx, s, schema);
+            if (!upsert(tx, s, registry, parameters, adapters, schema, *upsert_plan, row))
                 return;
             Row returned;
             for (auto c : returning)

@@ -332,3 +332,13 @@ with their types, containing new and deleted values respectively. They retain th
 normal atomic mutation guarantees and evaluate assignments/predicates once. The
 ordinary count-only APIs avoid allocating these result rows. SQL applies its own
 RETURNING projection outside the core.
+
+`Transaction::update_if` separates locating rows from deciding whether to update
+those rows. Its `matched` count is computed before the additional condition;
+`updated` includes accepted rows whose values remain unchanged. The condition
+runs only for matched rows, and assignments run only when it accepts a row.
+Assignments read the original row, as with `update`. Optional returned rows own
+all affected columns; disabling returning avoids materializing those results.
+The mutation is atomic, including evaluation and constraint failures. SQL UPSERT
+uses this distinction so a conflict rejected by its WHERE condition cannot turn
+into an insertion.

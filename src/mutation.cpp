@@ -167,6 +167,18 @@ Result Transaction::update_returning(const std::string& name, std::vector<Assign
     update_impl(name, std::move(assignments), std::move(where), &result.rows);
     return result;
 }
+UpdateOutcome Transaction::update_if(const std::string& name, std::vector<Assignment> assignments,
+                                     Predicate match, std::optional<Predicate> condition, bool returning) {
+    active();
+    UpdateOutcome result;
+    if (returning)
+        for (const auto& column : require_table(staged_->tables, name)->columns)
+            result.returning.types.push_back(column.type);
+    result.updated =
+        update_impl(name, std::move(assignments), std::move(match),
+                    returning ? &result.returning.rows : nullptr, &result.matched, std::move(condition));
+    return result;
+}
 Result Transaction::erase_returning(const std::string& name, std::optional<Predicate> where) {
     active();
     Result result;
@@ -176,7 +188,8 @@ Result Transaction::erase_returning(const std::string& name, std::optional<Predi
     return result;
 }
 std::size_t Transaction::update_impl(const std::string& name, std::vector<Assignment> assignments,
-                                     std::optional<Predicate> where, std::vector<Row>* returning) {
+                                     std::optional<Predicate> where, std::vector<Row>* returning,
+                                     std::size_t* matched_count, std::optional<Predicate> condition) {
     auto owner = active();
     auto& stored = require_table(staged_->tables, name);
     const auto& original = *stored;
@@ -194,6 +207,7 @@ std::size_t Transaction::update_impl(const std::string& name, std::vector<Assign
         bound.emplace_back(target.index, std::move(value));
     }
     auto predicate = bind_predicate(where, original, owner->registry);
+    auto additional = bind_predicate(condition, original, owner->registry);
     auto selected = candidates(original, predicate, owner->registry);
     if (selected)
         normalize(*selected);
@@ -225,6 +239,10 @@ std::size_t Transaction::update_impl(const std::string& name, std::vector<Assign
         visit_chunks(original, selected, [&](auto, const auto& chunk, RowSelection rows) {
             visit_rows(*chunk, rows, [&](auto i, const Row& row) {
                 if (predicate && !predicate->matches(row, owner->registry))
+                    return true;
+                if (matched_count)
+                    ++*matched_count;
+                if (additional && !additional->matches(row, owner->registry))
                     return true;
                 matched = true;
                 position = i;
@@ -263,6 +281,10 @@ std::size_t Transaction::update_impl(const std::string& name, std::vector<Assign
             std::shared_ptr<detail::Chunk> edited;
             visit_rows(*chunk, rows, [&](auto i, const Row& row) {
                 if (!matches(row))
+                    return true;
+                if (matched_count)
+                    ++*matched_count;
+                if (additional && !additional->matches(row, owner->registry))
                     return true;
                 if (!edited)
                     edited = std::make_shared<detail::Chunk>(*chunk);

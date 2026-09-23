@@ -36,6 +36,32 @@ int main() {
             db.emplace(Database::open(path, registry, options));
             const Predicate key{column("id"), Compare::equal, literal(std::int64_t{150})};
             const Query point{"t", {}, key};
+            {
+                auto tx = db->begin();
+                auto outcome =
+                    tx.update_if("t", {{"a", call("fail", {})}}, key,
+                                 Predicate{column("a"), Compare::less, literal(std::int64_t{0})}, true);
+                CHECK(outcome.matched == 1 && outcome.updated == 0 && outcome.returning.rows.empty());
+                CHECK(outcome.returning.types.size() == 4 && calls == 0);
+                outcome = tx.update_if("t", {{"a", call("fail", {})}},
+                                       Predicate{column("id"), Compare::equal, literal(std::int64_t{-1})},
+                                       Predicate{call("fail", {}), Compare::equal, literal(std::int64_t{0})});
+                CHECK(outcome.matched == 0 && outcome.updated == 0 && calls == 0);
+                outcome = tx.update_if("t", {{"a", column("a")}}, key);
+                CHECK(outcome.matched == 1 && outcome.updated == 1 && outcome.returning.rows.empty());
+                outcome = tx.update_if("t", {{"a", column("b")}, {"b", column("a")}}, key, {}, true);
+                CHECK(outcome.matched == 1 && outcome.updated == 1);
+                CHECK(outcome.returning.rows == tx.query(point).rows);
+                CHECK(outcome.returning.rows[0][1] == Value(std::int64_t{151}));
+                CHECK(outcome.returning.rows[0][2] == Value(std::int64_t{150}));
+                const auto before = tx.query(Query{"t"}).rows;
+                expect(ErrorCode::constraint, [&] {
+                    tx.update_if("t", {{"a", call("fail", {})}},
+                                 Predicate{column("id"), Compare::greater, literal(std::int64_t{0})});
+                });
+                CHECK(tx.query(Query{"t"}).rows == before);
+                calls = 0;
+            }
             // A matching no-op still evaluates assignments and returns its row,
             // but must not publish a new snapshot or write pages/log records.
             {

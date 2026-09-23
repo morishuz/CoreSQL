@@ -7,6 +7,43 @@ int main() {
         TempDirectory temp;
         Registry registry;
         sql::install(registry);
+        int evaluations = 0;
+        registry.add(Function{"observed",
+                              [](std::span<const Type> types) {
+                                  if (types.size() != 1 || types[0] != integer())
+                                      throw Error(ErrorCode::type, "argument");
+                                  return integer();
+                              },
+                              [&](std::span<const Value> args) -> Value {
+                                  ++evaluations;
+                                  return args[0];
+                              }});
+        {
+            Database db(registry);
+            sql::Connection c(db, registry);
+            c.execute("CREATE TABLE t(id INTEGER PRIMARY KEY, a INTEGER, b INTEGER, UNIQUE(a,b))");
+            c.execute("INSERT INTO t VALUES(1,10,20),(2,NULL,20)");
+            auto result = c.execute("INSERT INTO t VALUES(1,7,8) ON CONFLICT(id) DO UPDATE SET "
+                                    "a=observed(b),b=a RETURNING *");
+            CHECK(evaluations == 1 && result.changes == 1);
+            CHECK((result.rows == std::vector<Row>{{std::int64_t{1}, std::int64_t{20}, std::int64_t{10}}}));
+            result = c.execute("INSERT INTO t VALUES(1,7,8) ON CONFLICT(id) DO UPDATE SET "
+                               "a=observed(a) WHERE excluded.a IS NULL");
+            CHECK(result.changes == 0 && evaluations == 1);
+            result = c.execute("INSERT INTO t VALUES(1,7,8) ON CONFLICT(id) DO UPDATE SET a=observed(a)");
+            CHECK(result.changes == 1 && result.rows.empty() && evaluations == 2);
+            c.execute("INSERT INTO t VALUES(3,NULL,20) ON CONFLICT(a,b) DO UPDATE SET b=observed(b)");
+            CHECK(evaluations == 2 &&
+                  c.execute("SELECT count(*) FROM t").rows[0][0] == Value(std::int64_t{3}));
+            c.execute("INSERT INTO t VALUES(4,20,10),(5,20,11) ON CONFLICT(a,b) DO UPDATE SET b=b+1");
+            CHECK(c.execute("SELECT b FROM t WHERE id=1").rows[0][0] == Value(std::int64_t{12}));
+            CHECK(c.execute("SELECT count(*) FROM t").rows[0][0] == Value(std::int64_t{3}));
+            expect(ErrorCode::type, [&] {
+                c.execute("INSERT INTO t VALUES(99,1,2) ON CONFLICT(id) "
+                          "DO UPDATE SET a=observed('bad')");
+            });
+            db.begin().integrity_check();
+        }
         for (std::size_t cache : {std::size_t{0}, std::size_t{32768}}) {
             auto db = Database::open(temp.path / ("noop" + std::to_string(cache)), registry,
                                      OpenOptions{false, cache});
