@@ -77,6 +77,7 @@ struct Backend {
             drain();
         } catch (...) {
             failure = std::current_exception();
+            pending = false;
         }
         if (checkpoint_connection) {
             sqlite3_close(checkpoint_connection);

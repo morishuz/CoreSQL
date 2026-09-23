@@ -160,3 +160,22 @@ not a new automatic engine default. It uses the same one-job/coalescing mechanis
 CoreSQL's hard retained-history bound remains active and its automatic checkpoint
 counter reveals foreground fallbacks. Changing data size can require a different
 application policy; initial compacted size is only a fixed-fixture estimate.
+
+### Durable transaction batching
+
+Use `--phase batch_updates` for a separate family of 1, 4, 16 and 64 changed-row
+updates per transaction, using existing transaction APIs in both engines. Each
+phase executes `--operations` batches, so larger batches perform more row updates.
+All rows are checked after each phase, and durable runs verify reopening.
+A full checkpoint follows each durable phase. Its `_maintenance` time is separate
+from individual acknowledgements; `_wall` includes it, verification and measurement
+gaps, with all updated rows as units. Compare those end-to-end costs as well. This
+family is explicit and is not included in the default `all` workload.
+
+`batch_update_N` latency measures acknowledgement of the entire atomic batch;
+`units` is N rows. Report batch p50/p95/p99 separately from amortized time per row
+(total batch milliseconds divided by rows) and row throughput. A single commit
+acknowledges the whole batch. The fixture supplies ready batches, so these timings
+exclude any application wait to accumulate them; they are not independent
+single-row acknowledgement latency. There is no engine group-commit implementation
+or reduced synchronization setting in this comparison.

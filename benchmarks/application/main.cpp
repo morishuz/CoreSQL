@@ -78,7 +78,8 @@ struct Workload {
                   << storage.bytes_written << ',' << storage.checkpoints << '\n';
     }
     bool enabled(const std::string& phase) const {
-        if (only != "all" && only != phase)
+        if (only != "all" && only != phase &&
+            !(only == "batch_updates" && phase.starts_with("batch_update_")))
             return false;
         std::cerr << "PHASE_READY " << phase << std::endl;
         return true;
@@ -243,6 +244,34 @@ struct Workload {
             verify();
         }
     }
+    void batch_updates() {
+        for (const std::int64_t batch : {1, 4, 16, 64}) {
+            const auto phase = "batch_update_" + std::to_string(batch);
+            if (!enabled(phase))
+                continue;
+            const auto phase_start = Clock::now();
+            for (std::int64_t i = 0; i < operations; ++i) {
+                std::vector<std::int64_t> keys;
+                keys.reserve(static_cast<std::size_t>(batch));
+                for (std::int64_t j = 0; j < batch; ++j)
+                    keys.push_back(n / 2 + ((i * batch + j) * 7919) % (n / 2));
+                const auto value = 30000000 + batch * 1000000 + i;
+                transaction(phase, i, batch, [&] {
+                    for (auto key : keys)
+                        engine.exec(update, {value, key});
+                });
+                for (auto key : keys)
+                    values[key] = value;
+            }
+            if (engine.durable) {
+                const auto maintenance_start = Clock::now();
+                engine.checkpoint();
+                emit(phase + "_maintenance", 0, elapsed(maintenance_start, Clock::now()));
+            }
+            verify();
+            emit(phase + "_wall", 0, elapsed(phase_start, Clock::now()), operations * batch);
+        }
+    }
     void verify() {
         // Stream once: verification must not depend on primary-key range planning.
         std::vector<bool> seen(static_cast<std::size_t>(next - expired));
@@ -267,6 +296,8 @@ struct Workload {
         engine.start_measurement();
         const auto workload_start = Clock::now();
         writes();
+        if (only == "batch_updates")
+            batch_updates();
         const auto drain_start = Clock::now();
         engine.drain();
         emit("maintenance_drain", 0, elapsed(drain_start, Clock::now()));
@@ -309,8 +340,8 @@ struct Workload {
                   << " busy_retries=" << engine.busy_retries.load() << '\n';
         verify();
         engine.integrity();
-        if (engine.durable && only == "all") {
-            for (int i = 0; i < 3; ++i) {
+        if (engine.durable) {
+            for (int i = 0; i < (only == "all" ? 3 : 1); ++i) {
                 engine.close();
                 const auto start = Clock::now();
                 engine.open();
@@ -351,7 +382,8 @@ int main(int argc, char** argv) {
         check(phase == "all" || phase == "point_read" || phase == "event_page" || phase == "latest_events" ||
                   phase == "time_range" || phase == "small_join" || phase == "full_scan" ||
                   phase == "point_update" || phase == "upsert_existing" || phase == "upsert_unchanged" ||
-                  phase == "upsert_new" || phase == "append_16" || phase == "expire_16" || phase == "mixed",
+                  phase == "upsert_new" || phase == "append_16" || phase == "expire_16" || phase == "mixed" ||
+                  phase == "batch_updates",
               "Unknown phase");
         Temporary temp(argv[7]);
         Backend backend(engine == "coresql", mode == "durable", static_cast<std::size_t>(cache) * 1024 * 1024,

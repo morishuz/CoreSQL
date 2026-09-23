@@ -26,6 +26,7 @@ def summarize(path):
         times = sorted(float(row['milliseconds']) for row in rows)
         count = len(times)
         entry = {'samples': count, 'total_ms': sum(times),
+                 'mean_ms_per_unit': sum(times) / sum(int(r['units']) for r in rows),
                  'units_per_second': sum(int(r['units']) for r in rows) * 1000 / sum(times),
                  'min_ms': times[0], 'max_ms': times[-1],
                  'first_rss_bytes': int(rows[0]['rss_bytes']),
@@ -123,11 +124,22 @@ def main():
             lines.append(f'| {name} | INCOMPLETE: see results.json | — | — | — |')
             continue
         for phase in successful[0]['phases']:
-            if phase.endswith(('_execute', '_commit')) or phase in ('load_and_initial_checkpoint', 'checkpoint', 'checkpoint_request', 'maintenance_drain', 'write_workload_wall', 'reopen'):
+            if phase.endswith(('_execute', '_commit', '_maintenance', '_wall')) or phase in ('load_and_initial_checkpoint', 'checkpoint', 'checkpoint_request', 'maintenance_drain', 'write_workload_wall', 'reopen'):
                 continue
             medians = {e: statistics.median(r['phases'][phase]['p50_ms'] for r in successful if r['engine'] == e) for e in ['coresql', 'sqlite']}
             a, b = medians['coresql'], medians['sqlite']
             lines.append(f'| {name} | {phase} | {a:.4f} | {b:.4f} | {a/b:.2f} |')
+    if args.phase == 'batch_updates':
+        lines += ['', '| Scenario | Rows/batch | CoreSQL mean ms/row | SQLite mean ms/row |',
+                  '| --- | ---: | ---: | ---: |']
+        for name in args.scenarios:
+            successful = [r for r in manifest['runs'] if r['scenario'] == name and r['status'] == 'passed']
+            if len(successful) != args.runs * 2:
+                continue
+            for size in [1, 4, 16, 64]:
+                phase = f'batch_update_{size}'
+                means = {e: statistics.median(r['phases'][phase]['mean_ms_per_unit'] for r in successful if r['engine'] == e) for e in ['coresql', 'sqlite']}
+                lines.append(f"| {name} | {size} | {means['coresql']:.4f} | {means['sqlite']:.4f} |")
     (args.output / 'comparison.md').write_text('\n'.join(lines) + '\n')
     if any(r['status'] != 'passed' for r in manifest['runs']):
         raise SystemExit('Some runs failed or timed out; do not assign them speed ratios.')
