@@ -65,55 +65,59 @@ and callback scan streaming.
 
 ## Performance
 
-The latest recorded full **TPC-H Q1–Q22** comparison is a historical September 15,
-2026 run at **SF 0.03** (180,566 lineitems). CoreSQL completed and checked all 22
-queries. SQLite completed 20: CoreSQL was faster on 12, SQLite on eight; SQLite
-hit the 15-second timeout on Q19 and Q21. DuckDB was faster on all 22 in that run.
+The latest full **TPC-H Q1–Q22** comparison was measured September 23, 2026,
+at **SF 0.03** (180,566 lineitems), using CoreSQL commit `fd5ac5fe9c`.
+CoreSQL completed and checked all 22 queries. SQLite completed 20: CoreSQL was
+faster on 15, SQLite on five; SQLite hit the 15-second timeout on Q19 and Q21.
+DuckDB was faster than CoreSQL on all 22 queries.
 
 These are single-thread, in-memory client timings on an Apple M1 with 16 GiB RAM:
 median of three measured runs after one warmup, excluding loading. Parsing,
 execution and fetching are included. **SQLite uses adapted SQL, TEXT dates and
-approximate REAL decimals; CoreSQL uses native DATE/DECIMAL.** Drivers also differ.
-This is an engineering comparison, not an official TPC-H result, a durability
-benchmark, or evidence of general superiority.
+approximate REAL decimals; CoreSQL and DuckDB use native DATE/DECIMAL.** Drivers
+also differ. This is an engineering comparison, not an official TPC-H result,
+a durability benchmark, or evidence of general superiority.
 
 <details>
 <summary>All 22 query times — milliseconds, lower is better</summary>
 
-| Query | CoreSQL ms | SQLite ms |
-| --- | ---: | ---: |
-| Q1 | 175.283 | 90.511 |
-| Q2 | 21.437 | 19.803 |
-| Q3 | 32.464 | 48.350 |
-| Q4 | 19.690 | 37.819 |
-| Q5 | 39.436 | 70.774 |
-| Q6 | 29.702 | 11.726 |
-| Q7 | 64.957 | 56.954 |
-| Q8 | 34.362 | 129.663 |
-| Q9 | 57.243 | 158.060 |
-| Q10 | 24.927 | 18.897 |
-| Q11 | 5.360 | 25.208 |
-| Q12 | 30.588 | 23.301 |
-| Q13 | 38.574 | 46.479 |
-| Q14 | 20.049 | 11.768 |
-| Q15 | 20.177 | 11.745 |
-| Q16 | 8.206 | 10.973 |
-| Q17 | 13.022 | 801.836 |
-| Q18 | 62.454 | 75.183 |
-| Q19 | 14.256 | Timeout (>15 s) |
-| Q20 | 13.201 | 1251.266 |
-| Q21 | 600.516 | Timeout (>15 s) |
-| Q22 | 8.364 | 336.354 |
+| Query | CoreSQL ms | SQLite ms | SQLite ms / CoreSQL ms | DuckDB ms |
+| --- | ---: | ---: | ---: | ---: |
+| Q1 | 106.300 | 90.900 | 0.86× | 6.312 |
+| Q2 | 23.542 | 19.524 | 0.83× | 1.965 |
+| Q3 | 23.870 | 47.900 | 2.01× | 1.524 |
+| Q4 | 17.598 | 37.976 | 2.16× | 1.857 |
+| Q5 | 30.974 | 65.812 | 2.12× | 2.131 |
+| Q6 | 18.648 | 11.648 | 0.62× | 0.512 |
+| Q7 | 38.794 | 57.164 | 1.47× | 2.793 |
+| Q8 | 21.514 | 126.984 | 5.90× | 2.787 |
+| Q9 | 47.590 | 171.599 | 3.61× | 5.170 |
+| Q10 | 21.979 | 19.184 | 0.87× | 4.291 |
+| Q11 | 4.902 | 24.453 | 4.99× | 2.245 |
+| Q12 | 20.895 | 23.133 | 1.11× | 3.616 |
+| Q13 | 38.959 | 46.179 | 1.19× | 4.924 |
+| Q14 | 10.443 | 11.533 | 1.10× | 0.917 |
+| Q15 | 10.258 | 11.595 | 1.13× | 0.947 |
+| Q16 | 7.826 | 10.840 | 1.39× | 1.672 |
+| Q17 | 14.819 | 803.753 | 54.24× | 1.431 |
+| Q18 | 81.326 | 73.726 | 0.91× | 3.517 |
+| Q19 | 16.919 | Timeout (>15 s) | — | 6.587 |
+| Q20 | 13.209 | 1270.208 | 96.17× | 1.760 |
+| Q21 | 513.586 | Timeout (>15 s) | — | 4.690 |
+| Q22 | 7.923 | 336.730 | 42.50× | 1.368 |
 
-No speed ratio is assigned to timeouts. SQLite is the pinned 3.54.0 development
-baseline, not a stable-release comparison. CoreSQL was a modified working tree
-based on `2d3342712b`; these measurements predate the current changes and are not
-a benchmark of the current checkout. Three trials do not establish a stable
-ranking for close results; Q8 also showed variability in a separate check.
+**SQLite ms / CoreSQL ms** is the ratio of the measured medians: above 1 means
+CoreSQL is faster; below 1 means SQLite is faster. No ratio is assigned to timeouts.
+SQLite is the pinned 3.54.0 development baseline, not a stable-release comparison;
+DuckDB is 1.5.5. CoreSQL used a clean,
+test-enabled Release build with AppleClang 21.0.0 on macOS 27.0. Three trials do not
+establish a stable ranking for close results. The OS differs from
+the historical September 15 comparison, so changes between those runs cannot be
+attributed solely to CoreSQL changes.
 
-[Full methodology and DuckDB results](benchmarks/tpch/results/OPTIMIZATION_ROUND2.md)
-· [Raw measurements and fingerprints](benchmarks/tpch/results/optimization-round2-sf0.03.json)
-· [Reproduction instructions](benchmarks/tpch/README.md#include-the-pinned-sqlite-reference)
+[Methodology and reproduction](benchmarks/tpch/README.md#bounded-performance-comparison)
+· [Raw measurements, dataset manifest and fingerprints](benchmarks/tpch/results/tpch-2026-09-23-sf0.03.json)
+· [Historical September 15 comparison](benchmarks/tpch/results/OPTIMIZATION_ROUND2.md)
 
 </details>
 

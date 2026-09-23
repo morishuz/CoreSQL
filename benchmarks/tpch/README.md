@@ -1,9 +1,12 @@
 # TPC-H workload comparison
 
 Run the 22 checksum-pinned DuckDB queries against CoreSQL and optional reference
-engines. The [recorded comparison](results/OPTIMIZATION_ROUND2.md) supports the
-README table; it is a historical September 15, 2026 SF 0.03 run, not a measurement
-of the current checkout. This is an engineering comparison, not an official
+engines. The [README table](../../README.md#performance) uses the
+[September 23, 2026 measurements](results/tpch-2026-09-23-sf0.03.json) at
+SF 0.03 on CoreSQL `fd5ac5fe9c`. The report includes raw repetitions,
+answer checks, the dataset manifest and build fingerprints. The
+[September 15 comparison](results/OPTIMIZATION_ROUND2.md) is retained as historical
+evidence. This is an engineering comparison, not an official
 TPC-H result or a durability benchmark. Query pins and origins are in
 [manifest.json](manifest.json); reference dependencies are optional.
 
@@ -156,8 +159,10 @@ the native suite. It is a synthetic correctness fixture, not a benchmark run.
 ## Bounded performance comparison
 
 `measure.py` measures single-thread, in-memory **client latency** against the
-pinned DuckDB reference. See [the retained comparison](results/OPTIMIZATION_ROUND2.md)
-for the historical SF 0.03 results, including failures and resource limits.
+pinned DuckDB reference, with an optional pinned SQLite comparison. See the
+[latest table](../../README.md#performance) and
+[raw SF 0.03 results](results/tpch-2026-09-23-sf0.03.json), including failures
+and resource limits.
 This is an engineering comparison, not an official TPC-H score.
 
 ```sh
@@ -239,7 +244,7 @@ library/adapter fingerprints and explicit engine order. The raw field
 CoreSQL speedup, below 1 means CoreSQL is slower. The three drivers have different
 result-conversion overhead, so this remains a client-latency comparison.
 
-See [the retained three-engine table](results/OPTIMIZATION_ROUND2.md).
+See [the latest three-engine table](../../README.md#performance).
 
 ### Inspect execution work
 

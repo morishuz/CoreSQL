@@ -7,7 +7,8 @@ performance claims. In-memory commits do not measure durable write performance.
 - [Durable operations and landmark-memory example](operational.md)
 - [Combined public SQL suite: speedtest1, DuckDB micro, H2O and TPC-H](suite/README.md)
 - [TPC-H Q1–Q22: setup, validation and measurement](tpch/README.md)
-- [Retained September 15, 2026 comparison](tpch/results/OPTIMIZATION_ROUND2.md)
+- [September 23, 2026 comparison](../README.md#performance) and [raw evidence](tpch/results/tpch-2026-09-23-sf0.03.json)
+- [Historical September 15, 2026 comparison](tpch/results/OPTIMIZATION_ROUND2.md)
 - [speedtest1 adapter: coverage, semantics and reproduction](speedtest1.md)
 - [Checksum-pinned SQLite reference](reference/README.md)
 
@@ -49,8 +50,8 @@ Run profiling separately from timed comparisons.
 Retain raw repetitions, correctness results, source/binary fingerprints, dataset
 hashes and environment details with any published table. Report failures and
 resource limits without assigning speed ratios. The retained TPC-H evidence
-supports the README's historical claim; rerun on an exact release revision before
-claiming release performance.
+identifies the exact measured source revision; rerun on an exact release revision
+before claiming release performance.
 
 ## General ON join profiling
 
