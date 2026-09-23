@@ -61,7 +61,7 @@ void Transaction::vacuum() {
                         fail(ErrorCode::state, "Chunk identity exhausted");
                     table->chunks.emplace(table->next_chunk++, std::make_shared<detail::Chunk>());
                 }
-                auto& out = *table->chunks.rbegin()->second.writable();
+                auto& out = *table->chunks[table->chunks.rbegin()->first].writable();
                 out.rows.push_back(chunk->rows[i]);
                 out.rowids.push_back(chunk->rowids[i]);
                 detail::refresh(out);

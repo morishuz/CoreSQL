@@ -11,7 +11,7 @@ detail::State state(std::vector<std::int64_t> ids, std::int64_t next) {
     for (std::size_t i = 0; i < ids.size(); ++i) {
         if (i % 128 == 0)
             table->chunks.emplace(table->next_chunk++, std::make_shared<detail::Chunk>());
-        auto& chunk = *table->chunks.rbegin()->second.writable();
+        auto& chunk = *table->chunks[table->chunks.rbegin()->first].writable();
         chunk.rowids.push_back(ids[i]);
         chunk.rows.push_back({static_cast<std::int64_t>(i + 1), std::string(i % 2 ? 3 : 700, 'x')});
     }

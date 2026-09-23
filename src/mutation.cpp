@@ -88,11 +88,11 @@ void Transaction::insert_impl(const std::string& name, Row row, std::optional<st
     const auto id = new_chunk ? table.next_chunk : table.chunks.rbegin()->first;
     std::shared_ptr<detail::Chunk> prepared;
     if (new_chunk) {
-        table.chunks.reserve_insert();
+        table.chunks.reserve_insert(id);
         prepared = std::make_shared<detail::Chunk>();
         prepared->rows.reserve(1);
     } else {
-        auto& chunk = table.chunks.rbegin()->second;
+        auto& chunk = table.chunks[id];
         prepared = chunk.writable();
         if (prepared->rows.size() == prepared->rows.capacity())
             prepared->rows.reserve(std::max(std::size_t{1}, prepared->rows.size() * 2));

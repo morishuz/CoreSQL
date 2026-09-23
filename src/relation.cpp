@@ -20,7 +20,7 @@ std::string materialize(detail::Tables& tables, Result data) {
     for (auto& row : data.rows) {
         if (table->chunks.empty() || table->chunks.rbegin()->second.rows() == detail::chunk_rows)
             table->chunks.emplace(table->next_chunk++, std::make_shared<detail::Chunk>());
-        auto& chunk = *table->chunks.rbegin()->second.writable();
+        auto& chunk = *table->chunks[table->chunks.rbegin()->first].writable();
         chunk.rowids.push_back(table->next_rowid++);
         chunk.rows.push_back(std::move(row));
     }
