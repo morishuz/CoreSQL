@@ -22,7 +22,7 @@ add_library(coresql
   src/query.cpp src/query_scan.cpp src/query_join.cpp src/query_reduce.cpp
   src/disjunctive_join.cpp src/relation.cpp src/subquery_plan.cpp src/mutation.cpp
   src/transaction.cpp src/constraints.cpp src/schema.cpp src/registry.cpp src/index.cpp
-  src/ordered_index.cpp src/index_selection.cpp src/key_index.cpp src/snapshot.cpp src/storage.cpp
+  src/ordered_index.cpp src/ordered_scan.cpp src/index_selection.cpp src/key_index.cpp src/snapshot.cpp src/storage.cpp
   addons/scalars/type.cpp addons/aggregates/aggregates.cpp addons/relational/functions.cpp addons/hash_index/index.cpp)
 target_include_directories(coresql PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -134,6 +134,8 @@ if(BUILD_TESTING)
   coresql_test(coresql_background_checkpoint_test background_checkpoints tests/background_checkpoint_test.cpp coresql Threads::Threads)
   target_compile_definitions(coresql_background_checkpoint_test PRIVATE CORESQL_TESTING)
   coresql_test(coresql_sql_compatibility_test sql_compatibility tests/sql_compatibility_test.cpp coresql_sql)
+  coresql_test(coresql_ordered_scan_test ordered_scan tests/ordered_scan_test.cpp coresql_sql coresql_timestamp)
+  target_compile_definitions(coresql_ordered_scan_test PRIVATE CORESQL_TESTING)
   coresql_test(coresql_composite_range_test composite_range tests/composite_range_test.cpp coresql_sql)
   target_compile_definitions(coresql_composite_range_test PRIVATE CORESQL_TESTING)
   coresql_test(coresql_constraint_recovery_test constraint_recovery tests/constraint_recovery_test.cpp coresql_sql)

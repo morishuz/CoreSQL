@@ -175,7 +175,13 @@ Query q{"items", {column("id")}, {},
 Keys compare lexicographically through registered type comparators. NULL sorts
 first in ascending order and last in descending order. Complete ties retain scan
 order, including across a bounded LIMIT heap. All keys bind even on empty input
-or LIMIT 0; every matching row's keys evaluate before it can be discarded.
+or LIMIT 0. Computed keys and potentially failing predicates keep their full
+matching-row evaluation. Single-table column ordering with total native filters
+can seek a compatible ordered index, skipping leading columns fixed by non-null
+equalities, and stop after LIMIT qualifying rows. An optional range bounds the
+next index column. Complete boundary tie groups are examined to preserve scan
+order; large tie groups require accounted query-buffer space. OFFSET still
+requires skipping qualifying rows.
 The first owned key stays inline; additional keys use per-match storage. Heavy
 column/literal keys borrow from the immutable snapshot, whereas computed keys
 own their values. This is not a whole-query memory budget.

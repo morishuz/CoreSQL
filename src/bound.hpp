@@ -285,11 +285,13 @@ struct BoundPredicate {
 };
 BoundExpr bind(const Expr&, const Scope&, const Registry&, unsigned depth = 0);
 std::optional<BoundPredicate> bind_predicate(const std::optional<Predicate>&, const Scope&, const Registry&);
+// Normalize a total native column/literal comparison; NULL may still yield UNKNOWN.
+std::optional<BoundLeaf> native_column_literal(const Table&, const BoundPredicate&, const Registry&);
 std::optional<IndexResult> candidates(const Table&, std::optional<BoundPredicate>&, const Registry&);
 std::optional<IndexResult> composite_candidates(const Table&, const std::optional<BoundPredicate>&,
                                                 const Registry&);
 std::optional<IndexResult> primary_range_candidates(const Table&, const std::optional<BoundPredicate>&,
-                                                   const Registry&);
+                                                    const Registry&);
 void normalize(IndexResult&);
 // Only for proven total native join guards. Retains possible UNKNOWN rows and
 // never removes any part of the original predicate.

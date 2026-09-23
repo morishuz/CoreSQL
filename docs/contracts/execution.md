@@ -77,8 +77,12 @@ subqueries through their normal, possibly blocking operators.
 
 Primary-key equality scans and equality joins against a primary key use direct
 lookups. A single-table ORDER BY streams an ordered index when the requested
-columns are a direction-consistent prefix of that index; otherwise the cursor is
-rejected instead of sorting. Other filters use resumable chunk traversal. One or
+columns are a direction-consistent prefix of that index. For total native
+column/literal filters it can also seek past leading index columns fixed by
+non-null equalities and bound the next column's range. This path preserves scan
+order within complete ORDER BY tie groups; tie buffers count toward the query
+buffer limit. Unsupported orderings are rejected instead of fully sorting.
+Other filters use resumable chunk traversal. One or
 two joins use nested loops and retain only the current input pins. Longer join
 pipelines, blocking cursor operators and disk spilling are not implemented.
 

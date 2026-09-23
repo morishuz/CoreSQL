@@ -5,6 +5,7 @@
 #include "native_join.hpp"
 #include "projection_cache.hpp"
 #include "predicate_reuse.hpp"
+#include "ordered_scan.hpp"
 
 namespace coresql::detail::execution {
 Result run_scan(const Tables& tables, const Query& query, const Registry& registry,
@@ -99,6 +100,37 @@ Result run_scan(const Tables& tables, const Query& query, const Registry& regist
     // Validate the whole query even with no rows or LIMIT 0.
     if (query.limit == 0 || (scope.right && scope.right->row_count == 0))
         return result;
+    if (!scope.right && !query.search && !input_rows && !consumer && !visitor && !early)
+        if (auto plan = ordered_scan_plan(table, query, predicate, registry)) {
+            OrderedScan scan(table, *plan);
+            QueryBuffer output_memory;
+            while (auto entry = scan.next()) {
+                QueryBuffer traversal_memory;
+                traversal_memory.add(scan.buffer_bytes());
+                auto pinned = indexed_row(table, entry->location);
+                RowView row(pinned.chunk->rows[pinned.position], pinned.chunk->rowids[pinned.position]);
+#ifdef CORESQL_TESTING
+                ++detail::visited_chunks();
+                if (auto* counters = detail::active_query_counters)
+                    ++counters->rows_tested;
+#endif
+                if (predicate && !predicate->matches(row, registry))
+                    continue;
+                projection_cache.reset();
+                Row output;
+                output.reserve(projection.size());
+                for (const auto& expression : projection)
+                    output.push_back(expression.evaluate(row, registry));
+                output_memory.add_row(output, sizeof(Row));
+                result.rows.push_back(std::move(output));
+                if (result.rows.size() == query.limit)
+                    break;
+            }
+#ifdef CORESQL_TESTING
+            detail::record_query_stage("ordered_scan", result);
+#endif
+            return result;
+        }
     if (!scope.right && !query.search)
         selected = candidates(table, predicate, registry);
     QueryBuffer candidate_memory;

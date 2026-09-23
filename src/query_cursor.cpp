@@ -1,6 +1,7 @@
 #include "bound.hpp"
 #include "index.hpp"
 #include "ordered_index.hpp"
+#include "ordered_scan.hpp"
 #include "scan.hpp"
 #include <array>
 #include <coroutine>
@@ -155,6 +156,7 @@ struct StreamPlan {
     std::vector<Type> types;
     const OrderedIndex* order = nullptr;
     bool reverse_order = false;
+    std::optional<OrderedScanPlan> ordered;
     std::vector<StreamPlan> arms;
 };
 struct Parts {
@@ -319,8 +321,11 @@ StreamPlan bind_stream(const Tables& tables, const Query& query, const Registry&
             plan.projection.push_back(bind(expression, scope, registry));
     for (const auto& expression : plan.projection)
         plan.types.push_back(expression.type);
-    if (!query.order_by.empty())
-        plan.order = matching_order(left, query, plan.reverse_order);
+    if (!query.order_by.empty()) {
+        plan.ordered = ordered_scan_plan(left, query, plan.where, registry);
+        if (!plan.ordered)
+            plan.order = matching_order(left, query, plan.reverse_order);
+    }
     return plan;
 }
 StreamPlan bind_tree(const Tables& tables, const Query& query, const Registry& registry) {
@@ -356,7 +361,7 @@ Generator<Row> scan(const Tables&, const Query&, const Registry& registry, Strea
         co_return;
     }
     const Value* primary_key = nullptr;
-    if (plan.join_count == 0 && !plan.order && plan.left->primary && plan.where) {
+    if (plan.join_count == 0 && !plan.order && !plan.ordered && plan.left->primary && plan.where) {
         const BoundPredicate* guard = &*plan.where;
         while (guard->kind == Predicate::Kind::all && !guard->children.empty())
             guard = &guard->children.front();
@@ -364,6 +369,29 @@ Generator<Row> scan(const Tables&, const Query&, const Registry& registry, Strea
         if (direct && direct->operation == Compare::equal &&
             direct->left.index == plan.left->primary->column && !is_null(direct->right.value))
             primary_key = &direct->right.value;
+    }
+    if (plan.ordered) {
+        OrderedScan scan(*plan.left, *plan.ordered);
+        while (auto entry = scan.next()) {
+            std::optional<Row> output;
+            {
+                // Re-account suspended storage against this call's control.
+                // No QueryBuffer may survive co_yield and retain a stale control.
+                QueryBuffer memory;
+                memory.add(scan.buffer_bytes());
+                auto pinned = indexed_row(*plan.left, entry->location);
+#ifdef CORESQL_TESTING
+                ++detail::visited_chunks();
+#endif
+                output =
+                    project(part(pinned.chunk->rows[pinned.position], pinned.chunk->rowids[pinned.position]));
+                if (output)
+                    memory.add_row(*output, sizeof(Row));
+            }
+            if (output)
+                co_yield std::move(*output);
+        }
+        co_return;
     }
     if (plan.order) {
         OrderedIndex::Walk walk(*plan.order, plan.reverse_order);

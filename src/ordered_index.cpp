@@ -208,15 +208,63 @@ void OrderedIndex::Walk::descend(Link node) {
         node = reverse_ ? node->right : node->left;
     }
 }
-OrderedIndex::Walk::Walk(const OrderedIndex& index, bool reverse) : reverse_(reverse) {
-    descend(index.root_);
+int OrderedIndex::Walk::position(const Row& key) const {
+    if (!bounds_)
+        return 0;
+    const auto& prefix = bounds_->prefix;
+    for (std::size_t i = 0; i < prefix.size(); ++i) {
+        int c = is_null(key[i]) ? -1
+                                : index_->addons_[i].compare(index_->types_[i].parameters, key[i], prefix[i]);
+        if (c) {
+            c = (c > 0) - (c < 0);
+            return index_->definition.descending.empty() || !index_->definition.descending[i] ? c : -c;
+        }
+    }
+    const auto i = prefix.size();
+    if (i == index_->columns.size())
+        return 0;
+    auto compare = [&](const Value& value) {
+        return is_null(key[i]) ? -1 : index_->addons_[i].compare(index_->types_[i].parameters, key[i], value);
+    };
+    const bool desc = !index_->definition.descending.empty() && index_->definition.descending[i];
+    if (bounds_->lower && compare(*bounds_->lower) < 0)
+        return desc ? 1 : -1;
+    if (bounds_->upper && compare(*bounds_->upper) > 0)
+        return desc ? -1 : 1;
+    return 0;
 }
-std::optional<RowLocation> OrderedIndex::Walk::next() {
+OrderedIndex::Walk::Walk(const OrderedIndex& index, bool reverse, const Bounds* bounds)
+    : reverse_(reverse), index_(&index), bounds_(bounds) {
+    execution::QueryBuffer memory;
+    memory.add(index.height(index.root_) * sizeof(Link));
+    stack_.reserve(index.height(index.root_));
+    auto node = index.root_;
+    while (node) {
+        execution::query_step();
+        const int c = position(*node->key);
+        if (reverse_ ? c > 0 : c < 0)
+            node = reverse_ ? node->left : node->right;
+        else {
+            stack_.push_back(node);
+            node = reverse_ ? node->right : node->left;
+        }
+    }
+}
+std::optional<OrderedIndex::Entry> OrderedIndex::Walk::next_entry() {
     if (stack_.empty())
         return {};
+    execution::query_step();
     auto node = stack_.back();
     stack_.pop_back();
+    if (position(*node->key)) {
+        stack_.clear();
+        return {};
+    }
     descend(reverse_ ? node->left : node->right);
-    return node->location;
+    return Entry{node->key, node->location};
+}
+std::optional<RowLocation> OrderedIndex::Walk::next() {
+    auto entry = next_entry();
+    return entry ? std::optional{entry->location} : std::nullopt;
 }
 } // namespace coresql::detail

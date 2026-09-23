@@ -3,9 +3,8 @@
 #include "index.hpp"
 
 namespace coresql::detail::execution {
-namespace {
-std::optional<BoundLeaf> native_key(const Table& table, const BoundPredicate& predicate,
-                                    const Registry& registry) {
+std::optional<BoundLeaf> native_column_literal(const Table& table, const BoundPredicate& predicate,
+                                               const Registry& registry) {
     if (!predicate.leaf)
         return {};
     const auto& left = predicate.leaf->left;
@@ -34,8 +33,15 @@ std::optional<BoundLeaf> native_key(const Table& table, const BoundPredicate& pr
         }
     }
     if (leaf.left.kind != Expr::Kind::column || leaf.right.kind != Expr::Kind::literal ||
-        leaf.left.index >= table.columns.size() || is_null(leaf.right.value) ||
-        table.columns[leaf.left.index].nullable || !native_scalar(registry.addon(leaf.left.type)))
+        leaf.left.index >= table.columns.size() || !native_scalar(registry.addon(leaf.left.type)))
+        return {};
+    return leaf;
+}
+namespace {
+std::optional<BoundLeaf> native_key(const Table& table, const BoundPredicate& predicate,
+                                    const Registry& registry) {
+    auto leaf = native_column_literal(table, predicate, registry);
+    if (!leaf || is_null(leaf->right.value) || table.columns[leaf->left.index].nullable)
         return {};
     return leaf;
 }
