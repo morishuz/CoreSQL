@@ -475,6 +475,8 @@ std::optional<IndexResult> candidates(const detail::Table& table, std::optional<
     }
     if (!result)
         result = composite_candidates(table, predicate, registry);
+    if (!result)
+        result = primary_range_candidates(table, predicate, registry);
     if (!result && guard && guard->leaf) {
         const auto& leaf = *guard->leaf;
         if (leaf.left.kind == Expr::Kind::column && leaf.right.kind == Expr::Kind::literal &&

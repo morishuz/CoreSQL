@@ -174,6 +174,10 @@ public:
     virtual void validate(std::span<const IndexEntry>) const;
     // Unique lookup certifies equality, with no false positives or omissions.
     virtual std::optional<RowLocation> lookup(const Value&) const;
+    // Optional inclusive ordered candidates; nullptr means an unbounded end.
+    // Bounds are non-NULL values of the indexed type. nullopt requests a scan.
+    // May return false positives but no omissions; callers retain the residual.
+    virtual std::optional<IndexResult> range(const Value* lower, const Value* upper) const;
     virtual void validate_search(const std::string& operation) const;
     virtual Type search_type(const std::string& operation, const Type& source) const;
     virtual IndexResult search(const std::string&, const Value&) const;

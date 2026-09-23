@@ -53,6 +53,10 @@ int main() {
         };
         check(by(2001), 1, 4);
         check(by(-1), 0, 0);
+        check({literal(std::int64_t{2001}), Compare::equal, column("a", "id")}, 1, 4);
+        check(all_of({{column("a", "id"), Compare::greater_equal, literal(std::int64_t{2000})},
+                      {column("a", "id"), Compare::less, literal(std::int64_t{2010})}}),
+              10, 32);
         check(all_of({{column("a", "k"), Compare::equal, literal(std::int64_t{1})},
                       {column("a", "x"), Compare::greater, literal(2000.0)},
                       {column("a", "x"), Compare::less, literal(2010.0)}}),

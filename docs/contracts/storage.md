@@ -62,9 +62,14 @@ chunk-map metadata and encoded change record. It is not a fixed byte budget:
 large values, statements touching many chunks, and retained old transactions can
 still use substantial memory. Commit currently scans chunk metadata to identify
 changes. Direct primary-key equality visits at most one row chunk; other
-predicates use eligible ordered/search indexes or scan. The default resident
-primary index uses a shared array of 256 buckets, copied on write only where needed. Bucket copying adds memory/time proportional to affected
-buckets, potentially large for skewed hashes; non-key updates share the index.
+predicates use eligible primary ranges, ordered/search indexes or scan. The default
+resident primary index uses a shared array of 256 hash partitions, copied on write
+only where needed. Certified native-i64 keys use sorted contiguous buckets with
+binary-search point lookups; other keys use ordered map buckets. Ranges seek
+within these same buckets without maintaining a second index. Narrow native-i64
+intervals probe only the hash residues they can contain. Bucket copying and vector
+insertion add memory/time proportional to affected buckets, potentially large for
+skewed keys; non-key updates share the index.
 
 By default rows remain resident. Set `OpenOptions::page_cache_bytes` to a nonzero
 byte target to enable paging, for example `Database::open(path, registry,
@@ -217,7 +222,9 @@ primary keys use sorted disk-backed lookup images with binary search and a bound
 4096-key copy-on-write mutation overlay. Overlay compaction merges onto a new
 private disk image; old snapshots retain the previous image. Initial construction
 uses bounded 4096-key sorted runs and a disk merge, rather than an all-keys heap
-array. Mapped index pages are managed by the OS, outside the decoded-row cache.
+array. Range reads seek into the image and merge relevant overlay entries,
+including deletions, without decoding unrelated row chunks.
+Mapped index pages are managed by the OS, outside the decoded-row cache.
 
 `<database>.native-index` is a disposable persisted lookup-image cache. Its checksum
 and the fingerprint of the complete verified durable log must match before reuse.

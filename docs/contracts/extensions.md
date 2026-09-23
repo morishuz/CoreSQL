@@ -244,6 +244,7 @@ The same type can use different algorithms in different columns/tables.
 | `insert(value, location)` | Add one occurrence; on exception leave logical contents unchanged |
 | `erase(value, location)` | Remove one occurrence; may throw after partial private changes |
 | `lookup(value)` | Unique indexes: return the exact matching row location or no match |
+| `range(lower, upper)` | Optional inclusive ordered candidates; null pointers mean unbounded ends; return `nullopt` to decline |
 | `validate_search(operation)` | Reject unsupported operations even for empty tables/LIMIT 0 |
 | `search(operation, value)` | Return `IndexResult{rows, exact}` with no false negatives |
 | `matches(operation, stored, query)` | Exact residual predicate, independent of candidate selection |
@@ -259,6 +260,13 @@ must recheck each candidate. Both modes must return every matching row; this is
 not an approximate-search contract. The engine sorts/deduplicates locations,
 checks their validity, preserves scan order and applies remaining WHERE conditions,
 ordering, projection and limit. An exact result is not proof of unrelated filters.
+
+`range` receives non-NULL bounds of the indexed type and must not omit rows in
+the inclusive interval. It may return conservative candidates in any order;
+the engine always retains the original predicate, including strict endpoints.
+The default implementation returns `nullopt`, so existing providers keep scan
+fallbacks. Range access currently serves materialized queries and mutations;
+resumable cursors retain their existing equality lookup and scan paths.
 
 `search_type` declares the search operand type; its default is the column type.
 Explicit `Query::search` remains query-only and cannot be combined with a join.

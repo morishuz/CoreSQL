@@ -3,6 +3,83 @@
 #include "index.hpp"
 
 namespace coresql::detail::execution {
+namespace {
+std::optional<BoundLeaf> native_key(const Table& table, const BoundPredicate& predicate,
+                                    const Registry& registry) {
+    if (!predicate.leaf)
+        return {};
+    const auto& left = predicate.leaf->left;
+    const auto& right = predicate.leaf->right;
+    if (!((left.kind == Expr::Kind::column && right.kind == Expr::Kind::literal) ||
+          (left.kind == Expr::Kind::literal && right.kind == Expr::Kind::column)))
+        return {};
+    auto leaf = *predicate.leaf;
+    if (leaf.left.kind == Expr::Kind::literal && leaf.right.kind == Expr::Kind::column) {
+        std::swap(leaf.left, leaf.right);
+        switch (leaf.operation) {
+        case Compare::less:
+            leaf.operation = Compare::greater;
+            break;
+        case Compare::less_equal:
+            leaf.operation = Compare::greater_equal;
+            break;
+        case Compare::greater:
+            leaf.operation = Compare::less;
+            break;
+        case Compare::greater_equal:
+            leaf.operation = Compare::less_equal;
+            break;
+        default:
+            break;
+        }
+    }
+    if (leaf.left.kind != Expr::Kind::column || leaf.right.kind != Expr::Kind::literal ||
+        leaf.left.index >= table.columns.size() || is_null(leaf.right.value) ||
+        table.columns[leaf.left.index].nullable || !native_scalar(registry.addon(leaf.left.type)))
+        return {};
+    return leaf;
+}
+} // namespace
+
+std::optional<IndexResult> primary_range_candidates(const Table& table,
+                                                    const std::optional<BoundPredicate>& predicate,
+                                                    const Registry& registry) {
+    if (!table.primary || !predicate || !registry.addon(table.columns[table.primary->column].type).compare)
+        return {};
+    std::optional<Value> lower, upper;
+    auto collect = [&](auto&& self, const BoundPredicate& p) -> bool {
+        if (p.kind == Predicate::Kind::all) {
+            for (const auto& child : p.children)
+                if (!self(self, child))
+                    return false;
+            return true;
+        }
+        auto leaf = native_key(table, p, registry);
+        if (!leaf)
+            return false; // Do not cross callbacks or nullable comparisons.
+        if (leaf->left.index == table.primary->column) {
+            const auto& value = leaf->right.value;
+            if (leaf->operation == Compare::equal || leaf->operation == Compare::greater ||
+                leaf->operation == Compare::greater_equal)
+                if (!lower || leaf->comparison.compare(value, *lower) > 0)
+                    lower = value;
+            if (leaf->operation == Compare::equal || leaf->operation == Compare::less ||
+                leaf->operation == Compare::less_equal)
+                if (!upper || leaf->comparison.compare(value, *upper) < 0)
+                    upper = value;
+        }
+        return true;
+    };
+    collect(collect, *predicate);
+    if (!lower && !upper)
+        return {};
+    auto result = table.primary->data->range(lower ? &*lower : nullptr, upper ? &*upper : nullptr);
+    // Bounds are inclusive candidates, even when the original comparison is strict.
+    if (result)
+        result->exact = false;
+    return result;
+}
+
 std::optional<IndexResult> join_guard_candidates(const Table& table, const BoundPredicate& guard,
                                                  const Registry& registry) {
     if (guard.kind == Predicate::Kind::any) {
@@ -21,10 +98,7 @@ std::optional<IndexResult> join_guard_candidates(const Table& table, const Bound
         if (p.kind == Predicate::Kind::all) {
             for (const auto& child : p.children)
                 self(self, child);
-        } else if (const auto* leaf = p.direct_comparison();
-                   leaf && leaf->left.index < table.columns.size() && !is_null(leaf->right.value) &&
-                   !table.columns[leaf->left.index].nullable &&
-                   native_scalar(registry.addon(leaf->left.type))) {
+        } else if (auto leaf = native_key(table, p, registry)) {
             // These conjuncts cannot be UNKNOWN. Nullable guards remain in the
             // residual; discarding their NULL keys would change error behavior.
             keys->children.push_back(BoundPredicate{Predicate::Kind::comparison, *leaf, {}, {}});

@@ -1,6 +1,7 @@
 #include "paged_index.hpp"
 #include "index.hpp"
 #include "coresql/encoding.hpp"
+#include "query_control.hpp"
 #include <array>
 #include <bit>
 #include <cerrno>
@@ -114,7 +115,7 @@ struct Base {
     std::size_t offset = 0, count = 0;
     ByteView bytes() const { return file->bytes().subspan(offset, count * record_size); }
     Key get(std::size_t i) const { return read_key(bytes(), i); }
-    std::optional<RowLocation> lookup(std::int64_t key) const {
+    std::size_t lower_bound(std::int64_t key) const {
         std::size_t first = 0, last = count;
         while (first < last) {
             const auto middle = first + (last - first) / 2;
@@ -124,6 +125,10 @@ struct Base {
             else
                 last = middle;
         }
+        return first;
+    }
+    std::optional<RowLocation> lookup(std::int64_t key) const {
+        const auto first = lower_bound(key);
         if (first != count) {
             const auto row = get(first);
             if (row.key == key)
@@ -250,6 +255,34 @@ public:
         const auto key = std::get<std::int64_t>(value);
         auto found = changes_->find(key);
         return found != changes_->end() ? found->second : base_.lookup(key);
+    }
+    std::optional<IndexResult> range(const Value* lower, const Value* upper) const override {
+        const auto lo = lower ? std::get<std::int64_t>(*lower) : INT64_MIN;
+        const auto hi = upper ? std::get<std::int64_t>(*upper) : INT64_MAX;
+        IndexResult result;
+        auto position = base_.lower_bound(lo);
+        auto change = changes_->lower_bound(lo);
+        std::optional<Key> base;
+        auto advance = [&] {
+            base = position < base_.count ? std::optional(base_.get(position++)) : std::nullopt;
+            if (base && base->key > hi)
+                base.reset();
+        };
+        advance();
+        while (base || (change != changes_->end() && change->first <= hi)) {
+            execution::query_step();
+            if (change != changes_->end() && change->first <= hi && (!base || change->first <= base->key)) {
+                if (base && change->first == base->key)
+                    advance();
+                if (change->second)
+                    result.rows.push_back(*change->second);
+                ++change;
+            } else {
+                result.rows.push_back(base->location);
+                advance();
+            }
+        }
+        return result;
     }
     void insert(const Value& value, RowLocation location) override {
         if (lookup(value))

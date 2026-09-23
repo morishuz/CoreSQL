@@ -46,7 +46,7 @@ int main() { return tests([] {
         reuse.commit();
         CHECK(db.stats().rows == 600);
     }
-    // Verify actual traversal, including reversed equality and scan fallback.
+    // Verify actual traversal, including reversed equality and range candidates.
     {
         detail::visited_chunks() = 0;
         CHECK(db.query(get(256)).rows.size() == 1);
@@ -68,7 +68,7 @@ int main() { return tests([] {
         access.rollback();
         detail::visited_chunks() = 0;
         CHECK(db.query(Query{"items", {}, Predicate{column("id"), Compare::less, literal(std::int64_t{0})}}).rows.empty());
-        CHECK(detail::visited_chunks() > 1);
+        CHECK(detail::visited_chunks() <= 1); // At most the inclusive boundary candidate.
     }
     auto old=db.begin(), write=db.begin();
     CHECK(write.update("items",{{"id",literal(std::int64_t{700})}},by(256))==1);

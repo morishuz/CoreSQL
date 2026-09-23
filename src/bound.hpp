@@ -288,6 +288,8 @@ std::optional<BoundPredicate> bind_predicate(const std::optional<Predicate>&, co
 std::optional<IndexResult> candidates(const Table&, std::optional<BoundPredicate>&, const Registry&);
 std::optional<IndexResult> composite_candidates(const Table&, const std::optional<BoundPredicate>&,
                                                 const Registry&);
+std::optional<IndexResult> primary_range_candidates(const Table&, const std::optional<BoundPredicate>&,
+                                                   const Registry&);
 void normalize(IndexResult&);
 // Only for proven total native join guards. Retains possible UNKNOWN rows and
 // never removes any part of the original predicate.

@@ -304,6 +304,13 @@ lookup keeps precedence. This is deterministic prefix selection, not a statistic
 based cost optimizer. It avoids scanning unrelated rows; wider ranges can still
 return large candidate buffers.
 
+Primary-key ranges use the provider's optional range capability under the same
+leading native-comparison safety rules. Strict and reversed bounds retain their
+original residual comparison. Eligible repeatable inner joins also use existing
+indexes to select input candidates before joining. Their early guards preserve
+UNKNOWN rows, leave the final WHERE intact and do not cross potentially failing
+callbacks or source filters. Nullable-only guards conservatively retain scanning.
+
 `Transaction::update_returning` and `erase_returning` return all affected columns
 with their types, containing new and deleted values respectively. They retain the
 normal atomic mutation guarantees and evaluate assignments/predicates once. The
