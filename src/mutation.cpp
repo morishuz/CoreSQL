@@ -196,6 +196,60 @@ std::size_t Transaction::update_impl(const std::string& name, std::vector<Assign
     auto selected = candidates(original, predicate, owner->registry);
     if (selected)
         normalize(*selected);
+    // A point update that leaves keys and relational constraints untouched can
+    // prepare just its new row. Publication then needs no throwing callbacks;
+    // writable() still copies any chunk retained by a snapshot or savepoint.
+    auto row_only = [&] {
+        if (!selected || selected->rows.size() != 1 || !original.constraints.checks.empty() ||
+            !original.constraints.foreign_keys.empty() ||
+            (original.primary && seen.contains(original.primary->column)))
+            return false;
+        for (const auto& index : original.indexes)
+            if (seen.contains(index->column))
+                return false;
+        for (const auto& index : original.ordered)
+            for (auto column : index->columns)
+                if (seen.contains(column))
+                    return false;
+        for (const auto& [other, table] : staged_->tables)
+            for (const auto& key : table->constraints.foreign_keys)
+                if (key.referenced_table == name)
+                    return false;
+        return true;
+    };
+    if (row_only()) {
+        std::optional<Row> prepared;
+        std::size_t position = 0;
+        visit_chunks(original, selected, [&](auto, const auto& chunk, RowSelection rows) {
+            visit_rows(*chunk, rows, [&](auto i, const Row& row) {
+                if (predicate && !predicate->matches(row, owner->registry))
+                    return true;
+                prepared = row;
+                position = i;
+                for (const auto& [index, expression] : bound) {
+                    auto value = expression.evaluate(row, owner->registry);
+                    detail::validate_stored(value, original.columns[index], owner->registry);
+                    (*prepared)[index] = std::move(value);
+                }
+                if (returning)
+                    returning->push_back(*prepared);
+                return true;
+            });
+            return true;
+        });
+        if (!prepared)
+            return 0;
+        auto replacement = stored.use_count() == 1 ? stored : std::make_shared<detail::Table>(original);
+        auto& chunk = replacement->chunks[selected->rows.front().chunk].writable();
+        const auto prior_bytes = chunk->payload_bytes;
+        chunk->rows[position].swap(*prepared);
+        chunk->encoding_id = detail::next_chunk_encoding_id();
+        detail::refresh(*chunk);
+        replacement->payload_bytes = replacement->payload_bytes - prior_bytes + chunk->payload_bytes;
+        stored = std::move(replacement);
+        dirty_ = true;
+        return 1;
+    }
     const auto* comparison = predicate ? predicate->direct_comparison() : nullptr;
     std::shared_ptr<detail::Table> replacement;
     std::size_t changed = 0;
@@ -393,9 +447,12 @@ void Transaction::replace(const std::string& name, Row row) {
             auto found = index->equal(key);
             conflicts.rows.insert(conflicts.rows.end(), found.begin(), found.end());
         }
+    if (conflicts.rows.empty()) {
+        insert(name, std::move(row));
+        return;
+    }
     auto point = savepoint();
-    if (!conflicts.rows.empty())
-        erase_impl(name, {}, std::move(conflicts));
+    erase_impl(name, {}, std::move(conflicts));
     insert(name, std::move(row));
     point.release();
 }
