@@ -483,7 +483,6 @@ std::optional<IndexResult> candidates(const detail::Table& table, std::optional<
                 if (index->columns.front() == leaf.left.index) {
                     if (leaf.operation == Compare::equal) {
                         result = IndexResult{index->range(leaf.right.value, leaf.right.value), false};
-                        break;
                     }
                     if (predicate->kind == Predicate::Kind::all && predicate->children.size() >= 2) {
                         const auto& next = predicate->children[1];
@@ -494,8 +493,18 @@ std::optional<IndexResult> candidates(const detail::Table& table, std::optional<
                             next.leaf->operation == Compare::less_equal) {
                             result =
                                 IndexResult{index->range(leaf.right.value, next.leaf->right.value), false};
-                            break;
                         }
+                    }
+                    if (result) {
+                        // UNKNOWN does not short-circuit AND. Keep nullable
+                        // keys when later predicates may still need evaluation.
+                        if (table.columns[leaf.left.index].nullable &&
+                            predicate->kind != Predicate::Kind::comparison) {
+                            const Value null = Null(leaf.left.type);
+                            auto rows = index->range(null, null);
+                            result->rows.insert(result->rows.end(), rows.begin(), rows.end());
+                        }
+                        break;
                     }
                 }
         }

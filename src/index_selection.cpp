@@ -45,9 +45,11 @@ std::optional<IndexResult> composite_candidates(const Table& table,
             }
             for (const auto* leaf : prefix)
                 if (leaf->left.index == column) {
-                    if (leaf->operation == Compare::greater_equal)
+                    // Inclusive candidates also cover strict bounds; the
+                    // original predicate still rejects the boundary rows.
+                    if (leaf->operation == Compare::greater_equal || leaf->operation == Compare::greater)
                         lo = &leaf->right.value;
-                    if (leaf->operation == Compare::less_equal)
+                    if (leaf->operation == Compare::less_equal || leaf->operation == Compare::less)
                         hi = &leaf->right.value;
                 }
             break;

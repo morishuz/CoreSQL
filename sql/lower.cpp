@@ -1,5 +1,6 @@
 #include "lower.hpp"
 #include <array>
+#include <limits>
 #include <set>
 
 namespace coresql::sql::detail {
@@ -199,6 +200,16 @@ Expr Lowerer::expression(const Node& n) const {
             auto e = expression(n.args[0]);
             auto op = operation("negate", std::span<const Expr>(&e, 1));
             auto name = op ? op->function : "negate";
+            // Signed numeric literals are safe constants, not per-row calls.
+            // Keep overflowing integers and extension operations deferred so
+            // unreachable expressions retain their existing error behavior.
+            if (name == "sql.numeric_negate" && n.args[0].kind == Node::literal) {
+                if (const auto* value = std::get_if<double>(&e.value))
+                    return literal(-*value);
+                if (const auto* value = std::get_if<std::int64_t>(&e.value);
+                    value && *value != std::numeric_limits<std::int64_t>::min())
+                    return literal(-*value);
+            }
             return call(name, {std::move(e)});
         }
         return call(function_name(n.name),
