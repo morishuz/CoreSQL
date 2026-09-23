@@ -1,11 +1,40 @@
 #include "check.hpp"
 #include "coresql/sql.hpp"
+#include <bit>
 using namespace coresql;
 int main() {
     return tests([] {
         TempDirectory temp;
         Registry registry;
         sql::install(registry);
+        for (std::size_t cache : {std::size_t{0}, std::size_t{32768}}) {
+            auto db = Database::open(temp.path / ("noop" + std::to_string(cache)), registry,
+                                     OpenOptions{false, cache});
+            sql::Connection c(db, registry);
+            c.execute("CREATE TABLE t(id INTEGER PRIMARY KEY, v REAL, body TEXT)");
+            c.execute("INSERT INTO t VALUES(1,0.0,'payload')");
+            const auto bytes = db.storage_stats().bytes_written;
+            const auto pages = db.cache_stats().page_writes;
+            auto result = c.execute("INSERT INTO t VALUES(1,0.0,'ignored') ON CONFLICT(id) "
+                                    "DO UPDATE SET v=excluded.v RETURNING *");
+            CHECK(result.changes == 1 && result.rows == c.execute("SELECT * FROM t").rows);
+            CHECK(db.storage_stats().bytes_written == bytes);
+            CHECK(db.cache_stats().page_writes == pages);
+            {
+                auto tx = db.begin();
+                tx.update("t", {{"v", literal(-0.0)}},
+                          Predicate{column("id"), Compare::equal, literal(std::int64_t{1})});
+                tx.commit();
+                CHECK(db.storage_stats().bytes_written > bytes);
+                CHECK(std::bit_cast<std::uint64_t>(std::get<double>(
+                          c.execute("SELECT v FROM t").rows[0][0])) == std::bit_cast<std::uint64_t>(-0.0));
+            }
+            auto stale = db.begin();
+            c.execute("UPDATE t SET body='changed' WHERE id=1");
+            stale.update("t", {{"body", column("body")}},
+                         Predicate{column("id"), Compare::equal, literal(std::int64_t{1})});
+            expect(ErrorCode::conflict, [&] { stale.commit(); });
+        }
         {
             auto db = Database::open(temp.path / "db", registry);
             sql::Connection c(db, registry);

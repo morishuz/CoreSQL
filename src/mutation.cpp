@@ -2,6 +2,7 @@
 #include "scan.hpp"
 #include "index.hpp"
 #include "storage.hpp"
+#include "stored_value.hpp"
 
 namespace coresql {
 using namespace detail::execution;
@@ -219,26 +220,30 @@ std::size_t Transaction::update_impl(const std::string& name, std::vector<Assign
     };
     if (row_only()) {
         std::optional<Row> prepared;
+        bool matched = false;
         std::size_t position = 0;
         visit_chunks(original, selected, [&](auto, const auto& chunk, RowSelection rows) {
             visit_rows(*chunk, rows, [&](auto i, const Row& row) {
                 if (predicate && !predicate->matches(row, owner->registry))
                     return true;
-                prepared = row;
+                matched = true;
                 position = i;
                 for (const auto& [index, expression] : bound) {
                     auto value = expression.evaluate(row, owner->registry);
                     detail::validate_stored(value, original.columns[index], owner->registry);
-                    (*prepared)[index] = std::move(value);
+                    if (!prepared && !detail::same_stored_value(row[index], value))
+                        prepared = row;
+                    if (prepared)
+                        (*prepared)[index] = std::move(value);
                 }
                 if (returning)
-                    returning->push_back(*prepared);
+                    returning->push_back(prepared ? *prepared : row);
                 return true;
             });
             return true;
         });
         if (!prepared)
-            return 0;
+            return matched ? 1 : 0;
         auto replacement = stored.use_count() == 1 ? stored : std::make_shared<detail::Table>(original);
         auto& chunk = replacement->chunks[selected->rows.front().chunk].writable();
         const auto prior_bytes = chunk->payload_bytes;

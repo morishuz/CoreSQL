@@ -36,6 +36,25 @@ int main() {
             db.emplace(Database::open(path, registry, options));
             const Predicate key{column("id"), Compare::equal, literal(std::int64_t{150})};
             const Query point{"t", {}, key};
+            // A matching no-op still evaluates assignments and returns its row,
+            // but must not publish a new snapshot or write pages/log records.
+            {
+                const auto bytes = db->storage_stats().bytes_written;
+                const auto pages = db->cache_stats().page_writes;
+                auto concurrent = db->begin();
+                auto tx = db->begin();
+                expect(ErrorCode::constraint,
+                       [&] { tx.update("t", {{"a", column("a")}, {"b", call("fail", {})}}, key); });
+                CHECK(calls == 1);
+                calls = 0;
+                auto result = tx.update_returning("t", {{"a", column("a")}}, key);
+                CHECK(result.rows == tx.query(point).rows);
+                tx.commit();
+                CHECK(db->storage_stats().bytes_written == bytes);
+                CHECK(db->cache_stats().page_writes == pages);
+                concurrent.update("t", {{"note", literal(std::string("initial"))}}, key);
+                concurrent.commit();
+            }
             std::vector<Row> committed;
             {
                 auto old = db->begin();
@@ -63,6 +82,7 @@ int main() {
                 retained.reset();
                 CHECK(tx.update("t", {{"note", literal(std::string("final"))}}, key) == 1);
                 CHECK(returned.rows[0][3] == Value(std::string(1000, 'y')));
+                CHECK(tx.update("t", {{"a", column("a")}}, key) == 1);
                 tx.integrity_check();
                 committed = tx.query(point).rows;
                 tx.commit();

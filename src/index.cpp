@@ -1,3 +1,4 @@
+#include "stored_value.hpp"
 #include "index.hpp"
 #include <cassert>
 #include <algorithm>
@@ -113,14 +114,7 @@ void synchronize_index(const Table& original, Table& replacement, const Registry
                 for (std::size_t i = 0; i < chunk->rows.size(); ++i) {
                     const bool unchanged =
                         std::all_of(index->columns.begin(), index->columns.end(), [&](auto c) {
-                            const auto& a = before->rows[i][c];
-                            const auto& b = chunk->rows[i][c];
-                            if (a.index() != b.index())
-                                return false;
-                            if (const auto* value = std::get_if<double>(&a))
-                                return std::bit_cast<std::uint64_t>(*value) ==
-                                       std::bit_cast<std::uint64_t>(std::get<double>(b));
-                            return a == b;
+                            return same_stored_value(before->rows[i][c], chunk->rows[i][c]);
                         });
                     if (unchanged)
                         continue;
