@@ -96,6 +96,46 @@ int main() {
             CHECK(db.query(Query{"kept"}).rows.size() == 1);
             CHECK(db.query(Query{"changed"}).rows.size() == 2);
         }
+        {
+            const auto path = temp.path / "paged-reuse";
+            auto db = Database::open(path, {}, OpenOptions{true, 32768});
+            {
+                auto tx = db.begin();
+                tx.create_table("t", {{"id", integer(), true}, {"body", text()}});
+                for (std::int64_t id = 0; id < 400; ++id)
+                    tx.insert("t", {id, std::string(1024, 'a')});
+                tx.commit();
+            }
+            db.checkpoint();
+            db.trim_cache();
+            const auto reads = db.cache_stats().page_reads;
+            const auto reused = db.storage_stats().checkpoint_reused_chunks;
+            db.checkpoint();
+            CHECK(db.cache_stats().page_reads == reads);
+            CHECK(db.storage_stats().checkpoint_reused_chunks > reused);
+            // Evict/reload preserves identity; mutation must create a new one.
+            CHECK(db.query(Query{"t"}).rows.size() == 400);
+            auto tx = db.begin();
+            tx.update("t", {{"body", literal(std::string("changed"))}},
+                      Predicate{column("id"), Compare::equal, literal(std::int64_t{100})});
+            tx.commit();
+            db.trim_cache();
+            const auto before = db.storage_stats();
+            const auto before_reads = db.cache_stats().page_reads;
+            db.checkpoint_async().get();
+            CHECK(db.storage_stats().checkpoint_encoded_chunks == before.checkpoint_encoded_chunks + 1);
+            CHECK(db.storage_stats().checkpoint_reused_chunks > before.checkpoint_reused_chunks);
+            CHECK(db.cache_stats().page_reads == before_reads + 1);
+            CHECK(db.cache_stats().resident_bytes == 0);
+            CHECK(db.storage_stats().background_checkpoints == 1);
+        }
+        {
+            auto db = Database::open(temp.path / "paged-reuse");
+            auto result = db.query(Query{
+                "t", {column("body")}, Predicate{column("id"), Compare::equal, literal(std::int64_t{100})}});
+            CHECK(result.rows == std::vector<Row>{{std::string("changed")}});
+            db.begin().integrity_check();
+        }
         // Both background windows admit acknowledged commits: while the snapshot
         // is being written and after the first tail copy but before publication.
         for (const char* stage : {"background_checkpoint_created", "background_checkpoint_ready"}) {

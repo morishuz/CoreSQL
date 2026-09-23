@@ -10,7 +10,7 @@ struct Page {
     ~Page();
     std::shared_ptr<Pager> owner;
     std::shared_ptr<const std::vector<Column>> columns;
-    std::uint64_t id = 0, offset = 0;
+    std::uint64_t id = 0, offset = 0, encoding_id = 0;
     std::size_t length = 0, row_count = 0, payload_bytes = 0, encoded_bytes = 0;
     std::weak_ptr<Chunk> loaded;
 };
@@ -22,6 +22,7 @@ public:
     ~Pager();
     ChunkRef store(std::shared_ptr<Chunk>, std::shared_ptr<const std::vector<Column>>);
     std::shared_ptr<Chunk> pin(const std::shared_ptr<Page>&);
+    std::shared_ptr<Chunk> read_for_checkpoint(const std::shared_ptr<Page>&);
     CacheStats stats() const;
     const Registry& registry() const { return registry_; }
     void trim();
@@ -42,6 +43,7 @@ private:
     std::map<std::uint64_t, std::size_t> free_;
     std::list<std::pair<std::uint64_t, Entry>> cache_;
     std::unordered_map<std::uint64_t, decltype(cache_)::iterator> lookup_;
+    std::shared_ptr<Chunk> load(const std::shared_ptr<Page>&);
     void evict(std::size_t target);
     void retain(const std::shared_ptr<Page>&, std::shared_ptr<Chunk>);
 };

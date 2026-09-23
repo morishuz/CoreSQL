@@ -38,6 +38,12 @@ std::shared_ptr<Chunk> ChunkRef::pin() const {
         return page_->owner->pin(page_);
     throw Error(ErrorCode::state, "Missing chunk");
 }
+std::uint64_t ChunkRef::encoding_id() const {
+    return page_ ? page_->encoding_id : resident_->encoding_id;
+}
+std::shared_ptr<Chunk> ChunkRef::pin_for_checkpoint() const {
+    return page_ ? page_->owner->read_for_checkpoint(page_) : pin();
+}
 std::shared_ptr<Chunk>& ChunkRef::writable() {
     if (page_) {
         resident_ = std::make_shared<Chunk>(*pin());
@@ -110,6 +116,7 @@ ChunkRef Pager::store(std::shared_ptr<Chunk> chunk, std::shared_ptr<const std::v
     page->row_count = chunk->rows.size();
     page->payload_bytes = chunk->payload_bytes;
     page->encoded_bytes = chunk->encoded_bytes;
+    page->encoding_id = chunk->encoding_id;
     std::lock_guard lock(mutex_);
     if (bytes.size() > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) - end_)
         throw Error(ErrorCode::state, "Page backing exhausted file offset range");
@@ -149,26 +156,46 @@ std::shared_ptr<Chunk> Pager::pin(const std::shared_ptr<Page>& page) {
     std::lock_guard lock(mutex_);
     auto chunk = page->loaded.lock();
     if (!chunk) {
-        Bytes data(page->length);
-        std::span<std::byte> remaining(data);
-        auto offset = page->offset;
-        while (!remaining.empty()) {
-            auto n = ::pread(fd_, remaining.data(), remaining.size(), static_cast<off_t>(offset));
-            if (n < 0 && errno == EINTR)
-                continue;
-            if (n < 0)
-                io("Read page backing");
-            if (!n)
-                throw Error(ErrorCode::format, "Truncated page backing");
-            offset += static_cast<std::uint64_t>(n);
-            remaining = remaining.subspan(static_cast<std::size_t>(n));
-        }
-        chunk = decode_page(data, *page->columns, registry_);
+        chunk = load(page);
         page->loaded = chunk;
         ++reads_;
     }
     retain(page, chunk);
     evict(target_);
+    return chunk;
+}
+std::shared_ptr<Chunk> Pager::read_for_checkpoint(const std::shared_ptr<Page>& page) {
+    {
+        std::lock_guard lock(mutex_);
+        if (auto loaded = page->loaded.lock())
+            return loaded;
+    }
+    auto chunk = load(page);
+    {
+        std::lock_guard lock(mutex_);
+        ++reads_;
+    }
+    return chunk;
+}
+std::shared_ptr<Chunk> Pager::load(const std::shared_ptr<Page>& page) {
+    // The retained immutable Page owns this extent throughout the read.
+    // Maintenance calls this outside the pager mutex without touching the query cache.
+    Bytes data(page->length);
+    std::span<std::byte> remaining(data);
+    auto offset = page->offset;
+    while (!remaining.empty()) {
+        const auto n = ::pread(fd_, remaining.data(), remaining.size(), static_cast<off_t>(offset));
+        if (n < 0 && errno == EINTR)
+            continue;
+        if (n < 0)
+            io("Read checkpoint page");
+        if (!n)
+            throw Error(ErrorCode::format, "Truncated checkpoint page");
+        offset += static_cast<std::uint64_t>(n);
+        remaining = remaining.subspan(static_cast<std::size_t>(n));
+    }
+    auto chunk = decode_page(data, *page->columns, registry_);
+    chunk->encoding_id = page->encoding_id;
     return chunk;
 }
 CacheStats Pager::stats() const {

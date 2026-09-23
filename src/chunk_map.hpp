@@ -19,6 +19,8 @@ public:
     ChunkRef() = default;
     ChunkRef(std::shared_ptr<Chunk> chunk) : resident_(std::move(chunk)) {}
     std::shared_ptr<Chunk> pin() const;
+    std::shared_ptr<Chunk> pin_for_checkpoint() const;
+    std::uint64_t encoding_id() const;
     // Only private, mutable transaction chunks may use this accessor.
     std::shared_ptr<Chunk>& writable();
     std::size_t rows() const;

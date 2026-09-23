@@ -470,6 +470,23 @@ struct Stats {
 struct StorageStats {
     // Bytes submitted by this handle, including checkpoints; not device writes.
     std::uint64_t bytes_written = 0, checkpoints = 0;
+    // Cumulative maintenance diagnostics. Phase times include nested I/O times;
+    // snapshots of concurrent counters are approximate, not transactional.
+    std::uint64_t checkpoint_prepare_ns = 0;
+    std::uint64_t checkpoint_encode_ns = 0;
+    std::uint64_t checkpoint_catchup_ns = 0;
+    std::uint64_t checkpoint_publish_ns = 0;
+    std::uint64_t checkpoint_capture_wait_ns = 0;
+    std::uint64_t checkpoint_publish_wait_ns = 0;
+    std::uint64_t checkpoint_sync_ns = 0;
+    std::uint64_t checkpoint_directory_ns = 0;
+    std::uint64_t checkpoint_catchup_bytes = 0;
+    std::uint64_t checkpoint_catchup_passes = 0;
+    std::uint64_t background_checkpoints = 0;
+    std::uint64_t superseded_checkpoints = 0;
+    std::uint64_t automatic_checkpoints = 0;
+    std::uint64_t checkpoint_reused_chunks = 0;
+    std::uint64_t checkpoint_encoded_chunks = 0;
 };
 
 struct OpenOptions {

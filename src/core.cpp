@@ -94,7 +94,24 @@ StorageStats Database::storage_stats() const {
     detail::healthy(owner_);
     if (!owner_->storage)
         return {};
-    return {owner_->storage->bytes_written, owner_->storage->checkpoints};
+    const auto& store = *owner_->storage;
+    return {.bytes_written = store.bytes_written.load(std::memory_order_relaxed),
+            .checkpoints = store.checkpoints.load(std::memory_order_relaxed),
+            .checkpoint_prepare_ns = store.checkpoint_prepare_ns.load(std::memory_order_relaxed),
+            .checkpoint_encode_ns = store.checkpoint_encode_ns.load(std::memory_order_relaxed),
+            .checkpoint_catchup_ns = store.checkpoint_catchup_ns.load(std::memory_order_relaxed),
+            .checkpoint_publish_ns = store.checkpoint_publish_ns.load(std::memory_order_relaxed),
+            .checkpoint_capture_wait_ns = store.checkpoint_capture_wait_ns.load(std::memory_order_relaxed),
+            .checkpoint_publish_wait_ns = store.checkpoint_publish_wait_ns.load(std::memory_order_relaxed),
+            .checkpoint_sync_ns = store.checkpoint_sync_ns.load(std::memory_order_relaxed),
+            .checkpoint_directory_ns = store.checkpoint_directory_ns.load(std::memory_order_relaxed),
+            .checkpoint_catchup_bytes = store.checkpoint_catchup_bytes.load(std::memory_order_relaxed),
+            .checkpoint_catchup_passes = store.checkpoint_catchup_passes.load(std::memory_order_relaxed),
+            .background_checkpoints = store.background_checkpoints.load(std::memory_order_relaxed),
+            .superseded_checkpoints = store.superseded_checkpoints.load(std::memory_order_relaxed),
+            .automatic_checkpoints = store.automatic_checkpoints.load(std::memory_order_relaxed),
+            .checkpoint_reused_chunks = store.checkpoint_reused_chunks.load(std::memory_order_relaxed),
+            .checkpoint_encoded_chunks = store.checkpoint_encoded_chunks.load(std::memory_order_relaxed)};
 }
 CacheStats Database::cache_stats() const {
     detail::healthy(owner_);

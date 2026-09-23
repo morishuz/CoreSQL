@@ -50,6 +50,9 @@ def main():
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--operations', type=int, default=1000)
     parser.add_argument('--covering-index', action='store_true', help='Use (device,ts,id) in both engines instead of (device,ts)')
+    parser.add_argument('--background-checkpoints', action='store_true', help='Run checkpoint maintenance on a separate worker in both engines')
+    parser.add_argument('--adaptive-checkpoints', action='store_true', help='Schedule background maintenance by log growth and age')
+    parser.add_argument('--phase', default='all', help='Run one workload phase or all')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--scenarios', nargs='+', default=['memory-small', 'memory-large', 'durable-small', 'durable-cache-pressure'])
     args = parser.parse_args()
@@ -71,7 +74,7 @@ def main():
         for line in cache_path.read_text().splitlines():
             if ':' in line and '=' in line and line.split(':', 1)[0] in keys:
                 build_options[line.split(':', 1)[0]] = line.split('=', 1)[1]
-    manifest = {'covering_index': args.covering_index, 'cmake_options': build_options, 'source_revision': git('rev-parse', 'HEAD'), 'source_diff': git('diff', '--stat'),
+    manifest = {'adaptive_checkpoints': args.adaptive_checkpoints, 'background_checkpoints': args.background_checkpoints, 'phase': args.phase, 'covering_index': args.covering_index, 'cmake_options': build_options, 'source_revision': git('rev-parse', 'HEAD'), 'source_diff': git('diff', '--stat'),
                 'binary': str(binary), 'binary_sha256': digest(binary),
                 'harness_sha256': {str(p.relative_to(root)): digest(p) for p in Path(__file__).parent.glob('*') if p.is_file()},
                 'platform': platform.platform(), 'machine': platform.machine(),
@@ -86,9 +89,13 @@ def main():
             for engine in engines:
                 stem = f'{name}-{repeat}-{engine}'
                 csv_path, err_path = args.output / (stem + '.csv'), args.output / (stem + '.stderr')
-                command = [str(binary), engine, mode, str(rows), str(payload), str(args.operations), str(cache), str(args.output.resolve()), 'all']
+                command = [str(binary), engine, mode, str(rows), str(payload), str(args.operations), str(cache), str(args.output.resolve()), args.phase]
                 if args.covering_index:
                     command.append('covering')
+                if args.adaptive_checkpoints:
+                    command.append('adaptive')
+                elif args.background_checkpoints:
+                    command.append('background')
                 entry = {'scenario': name, 'repeat': repeat, 'engine': engine, 'command': command,
                          'rows': rows, 'payload_bytes': payload, 'cache_mib': cache, 'status': 'running'}
                 print(stem, flush=True)
@@ -116,7 +123,7 @@ def main():
             lines.append(f'| {name} | INCOMPLETE: see results.json | — | — | — |')
             continue
         for phase in successful[0]['phases']:
-            if phase.endswith(('_execute', '_commit')) or phase in ('load_and_initial_checkpoint', 'checkpoint', 'reopen'):
+            if phase.endswith(('_execute', '_commit')) or phase in ('load_and_initial_checkpoint', 'checkpoint', 'checkpoint_request', 'maintenance_drain', 'write_workload_wall', 'reopen'):
                 continue
             medians = {e: statistics.median(r['phases'][phase]['p50_ms'] for r in successful if r['engine'] == e) for e in ['coresql', 'sqlite']}
             a, b = medians['coresql'], medians['sqlite']

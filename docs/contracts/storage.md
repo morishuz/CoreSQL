@@ -41,15 +41,15 @@ to write calls and completed checkpoints; these are not device-level write count
 
 ## Shared chunks
 
-Each table owns a dense, ID-sorted vector of chunk IDs and shared chunk references.
+Each table owns ID-sorted, shared blocks of chunk references (up to 64 IDs per block).
 A reference retains either resident data or an immutable disk page. A chunk contains
 at most 128 rows. Inserts target at most 16 KiB of encoded row data per chunk;
 a single large row can exceed that target, and updates can grow an existing chunk.
 IDs preserve row order and do not shift when other chunks are deleted.
 
-Beginning a transaction shares tables. A modified table copies its chunk map,
-not all its rows. The copy allocates once and is proportional to live chunk count,
-not the highest historical ID. Lookup uses binary search. Updates and deletes copy only affected chunks into a candidate
+Beginning a transaction shares tables. A modified table copies the directory of
+metadata blocks and detaches only blocks it edits, not all chunk references or rows.
+Sparse historical IDs do not allocate intervening blocks. Lookup uses binary search. Updates and deletes copy only affected chunks into a candidate
 table; it replaces staged state only after the entire statement succeeds.
 Inserts reuse privately owned chunks within a transaction. Unchanged chunks stay
 shared with older snapshots. Empty chunks are removed, including from the log.
@@ -60,8 +60,8 @@ write-cost guarantee.
 Small-write temporary storage is proportional to affected chunks plus a table's
 chunk-map metadata and encoded change record. It is not a fixed byte budget:
 large values, statements touching many chunks, and retained old transactions can
-still use substantial memory. Commit currently scans chunk metadata to identify
-changes. Direct primary-key equality visits at most one row chunk; other
+still use substantial memory. Commit compares shared metadata blocks and inspects changed blocks to identify
+changed chunks. Encoded-size checks reuse cached totals for unchanged blocks. Direct primary-key equality visits at most one row chunk; other
 predicates use eligible primary ranges, ordered/search indexes or scan. The default
 resident primary index uses a shared array of 256 hash partitions, copied on write
 only where needed. Certified native-i64 keys use sorted contiguous buckets with
@@ -146,6 +146,18 @@ checkpoint path, and the log-size threshold still forces synchronous maintenance
 when necessary; background work never disables the existing history bound. During
 a concurrent synchronous replacement, the old log and both candidates can briefly
 coexist on disk.
+
+Checkpoint reuse includes paged chunks. Immutable page identities survive cache
+eviction; mutations allocate new identities. Reused records are copied from the
+retained durable file before decoding pages. Cold chunks that need encoding are
+read without replacing query-cache entries. The checkpoint remains a complete,
+checksummed state; this does not turn it into an incremental on-disk format.
+
+`storage_stats()` exposes cumulative maintenance durations, catch-up bytes/passes,
+reused/encoded chunks, completed background jobs, superseded jobs and automatic
+foreground checkpoints. Phase durations include nested I/O; concurrent counter
+reads are approximate. These diagnostics help identify maintenance lag and writer
+stalls, rather than providing a latency guarantee.
 
 The final copied tail is bounded, but synchronization, directory operations,
 scheduling and a single large transaction have no deadline guarantee. A busy

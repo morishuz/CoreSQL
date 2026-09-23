@@ -477,8 +477,8 @@ Bytes detail::encode_changes(const State& base, const State& next) {
 // table's schema is temporarily materialized; rows and chunks are never copied.
 void detail::encode_checkpoint(
     const State& state, const std::function<void(ByteView)>& sink,
-    const std::function<bool(const Chunk&, const std::function<void(ByteView)>&)>& reuse,
-    const std::function<void(const Chunk&, std::uint64_t, std::uint64_t)>& note) {
+    const std::function<bool(std::uint64_t, const std::function<void(ByteView)>&)>& reuse,
+    const std::function<void(std::uint64_t, std::uint64_t, std::uint64_t)>& note) {
     checkpoint_size(state);
     std::uint64_t hash = 14695981039346656037ULL;
     std::size_t size = 0;
@@ -526,9 +526,9 @@ void detail::encode_checkpoint(
         number(static_cast<std::uint64_t>(table->next_rowid));
         number(table->chunks.size());
         for (const auto& [id, reference] : table->chunks) {
-            const auto chunk = reference.pin();
+            const auto identity = reference.encoding_id();
             const auto start = size;
-            const bool reused = reuse && reuse(*chunk, emit);
+            const bool reused = reuse && reuse(identity, emit);
 #ifdef CORESQL_TESTING
             if (reused)
                 ++detail::checkpoint_chunks_reused();
@@ -536,6 +536,7 @@ void detail::encode_checkpoint(
                 ++detail::checkpoint_chunks_encoded();
 #endif
             if (!reused) {
+                const auto chunk = reference.pin_for_checkpoint();
                 number(id);
                 number(chunk->rows.size());
                 for (std::size_t row = 0; row < chunk->rows.size(); ++row) {
@@ -544,8 +545,8 @@ void detail::encode_checkpoint(
                         emit_value(item, number, bytes_field);
                 }
             }
-            if (note && !reference.paged())
-                note(*chunk, start, size - start);
+            if (note)
+                note(identity, start, size - start);
         }
     }
     flush();

@@ -2,6 +2,9 @@
 #include "coresql/sql.hpp"
 #include <sqlite3.h>
 #include <map>
+#include <future>
+#include <atomic>
+#include <chrono>
 #include <memory>
 #include <sys/resource.h>
 #ifdef __APPLE__
@@ -37,7 +40,14 @@ inline std::pair<std::uint64_t, std::uint64_t> memory() {
 #endif
 }
 struct Backend {
-    bool core, durable;
+    bool core, durable, background, adaptive;
+    std::uint64_t compacted_bytes = 0;
+    std::chrono::steady_clock::time_point last_checkpoint = std::chrono::steady_clock::now();
+    std::future<void> maintenance;
+    std::uint64_t requested = 0, started = 0, completed = 0, coalesced = 0;
+    std::atomic<std::uint64_t> busy_retries{0};
+    sqlite3* checkpoint_connection = nullptr;
+    bool pending = false;
     std::size_t cache;
     std::filesystem::path path;
     Registry registry;
@@ -49,13 +59,29 @@ struct Backend {
         void operator()(sqlite3_stmt* s) const { sqlite3_finalize(s); }
     };
     std::map<std::string, std::unique_ptr<sqlite3_stmt, Finalize>> prepared;
-    Backend(bool c, bool d, std::size_t bytes, std::filesystem::path file)
-        : core(c), durable(d), cache(bytes), path(std::move(file)) {
+    Backend(bool c, bool d, std::size_t bytes, std::filesystem::path file, bool bg = false,
+            bool policy = false)
+        : core(c), durable(d), background(bg), adaptive(policy), cache(bytes), path(std::move(file)) {
         sql::install(registry);
         open();
     }
-    ~Backend() { close(); }
+    ~Backend() {
+        try {
+            close();
+        } catch (...) { /* Explicit drain reports maintenance errors. */
+        }
+    }
     void close() {
+        std::exception_ptr failure;
+        try {
+            drain();
+        } catch (...) {
+            failure = std::current_exception();
+        }
+        if (checkpoint_connection) {
+            sqlite3_close(checkpoint_connection);
+            checkpoint_connection = nullptr;
+        }
         parsed.clear();
         prepared.clear();
         connection.reset();
@@ -64,10 +90,12 @@ struct Backend {
             sqlite3_close(sqlite);
             sqlite = nullptr;
         }
+        if (failure)
+            std::rethrow_exception(failure);
     }
     void open() {
         if (core) {
-            OpenOptions options{.page_cache_bytes = cache};
+            OpenOptions options{.concurrent_reads = true, .page_cache_bytes = cache};
             if (durable)
                 db.emplace(Database::open(path, registry, options));
             else
@@ -76,6 +104,7 @@ struct Backend {
         } else {
             check(sqlite3_open(durable ? path.c_str() : ":memory:", &sqlite) == SQLITE_OK,
                   "SQLite open failed");
+            sqlite3_busy_timeout(sqlite, 5000);
             exec("PRAGMA journal_mode=" + std::string(durable ? "WAL" : "MEMORY"));
             exec("PRAGMA synchronous=FULL");
             exec("PRAGMA fullfsync=ON");
@@ -89,6 +118,17 @@ struct Backend {
                   "SQLite checkpoint sync setting");
             check(exec("PRAGMA journal_mode")[0][0] == Value(std::string(durable ? "wal" : "memory")),
                   "SQLite journal setting");
+            if (background && durable) {
+                sqlite3_busy_timeout(sqlite, 5000);
+                check(sqlite3_open(path.c_str(), &checkpoint_connection) == SQLITE_OK,
+                      "SQLite checkpoint connection failed");
+                check(sqlite3_exec(checkpoint_connection,
+                                   "PRAGMA synchronous=FULL; PRAGMA fullfsync=ON; "
+                                   "PRAGMA checkpoint_fullfsync=ON; PRAGMA wal_autocheckpoint=0;",
+                                   nullptr, nullptr, nullptr) == SQLITE_OK,
+                      "SQLite checkpoint settings failed");
+                sqlite3_busy_timeout(checkpoint_connection, 50);
+            }
         }
     }
     void prepare(const std::string& text) {
@@ -97,7 +137,8 @@ struct Backend {
                 parsed.emplace(text, sql::Statement(text));
         } else if (!prepared.contains(text)) {
             sqlite3_stmt* s = nullptr;
-            const int rc = sqlite3_prepare_v2(sqlite, text.c_str(), -1, &s, nullptr);
+            const auto sql = durable && text == "BEGIN" ? std::string("BEGIN IMMEDIATE") : text;
+            const int rc = sqlite3_prepare_v2(sqlite, sql.c_str(), -1, &s, nullptr);
             std::unique_ptr<sqlite3_stmt, Finalize> guard(s);
             check(rc == SQLITE_OK, sqlite3_errmsg(sqlite));
             prepared.emplace(text, std::move(guard));
@@ -173,6 +214,75 @@ struct Backend {
                       SQLITE_OK,
                   sqlite3_errmsg(sqlite));
             check(log == done, "Incomplete SQLite checkpoint");
+        }
+    }
+    void poll() {
+        if (maintenance.valid() &&
+            maintenance.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            maintenance.get();
+            ++completed;
+            last_checkpoint = std::chrono::steady_clock::now();
+        }
+        if (pending && !maintenance.valid()) {
+            pending = false;
+            ++started;
+            if (core)
+                maintenance = db->checkpoint_async();
+            else
+                maintenance = std::async(std::launch::async, [this] {
+                    for (int attempt = 0; attempt < 1000; ++attempt) {
+                        int log = 0, done = 0;
+                        const int rc = sqlite3_wal_checkpoint_v2(checkpoint_connection, nullptr,
+                                                                 SQLITE_CHECKPOINT_TRUNCATE, &log, &done);
+                        if (rc == SQLITE_BUSY) {
+                            ++busy_retries;
+                            continue;
+                        }
+                        check(rc == SQLITE_OK && log == done, "SQLite background checkpoint failed");
+                        return;
+                    }
+                    throw std::runtime_error("SQLite background checkpoint retry limit reached");
+                });
+        }
+    }
+    void start_measurement() {
+        if (durable)
+            compacted_bytes = std::filesystem::file_size(path);
+        last_checkpoint = std::chrono::steady_clock::now();
+    }
+    void request_checkpoint() {
+        if (adaptive) {
+            std::error_code error;
+            const auto bytes = std::filesystem::file_size(
+                core ? path : std::filesystem::path(path.string() + "-wal"), error);
+            if (error && error != std::errc::no_such_file_or_directory)
+                throw std::filesystem::filesystem_error("Measure checkpoint backlog", path, error);
+            const auto growth =
+                error ? 0 : (core ? (bytes > compacted_bytes ? bytes - compacted_bytes : 0) : bytes);
+            const auto threshold = std::max<std::uint64_t>(1024 * 1024, compacted_bytes / 2);
+            const bool aged = std::chrono::steady_clock::now() - last_checkpoint >= std::chrono::seconds(1);
+            if (growth < threshold && !(aged && growth > 0))
+                return;
+        }
+        ++requested;
+        if (!background) {
+            checkpoint();
+            ++started;
+            ++completed;
+            return;
+        }
+        if (pending)
+            ++coalesced;
+        pending = true;
+        poll();
+    }
+    void drain() {
+        while (maintenance.valid() || pending) {
+            if (maintenance.valid()) {
+                maintenance.get();
+                ++completed;
+            }
+            poll();
         }
     }
     void integrity() {

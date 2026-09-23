@@ -63,7 +63,9 @@ std::future<void> Database::checkpoint_async() {
     std::shared_ptr<const detail::State> state;
     std::unique_ptr<detail::DurableStore::Checkpoint> work;
     {
+        const auto start = detail::MaintenanceClock::now();
         std::lock_guard lock(owner->commit_mutex);
+        store->checkpoint_capture_wait_ns += detail::elapsed_ns(start);
         detail::healthy(owner);
         state = owner->capture();
         work = store->prepare_checkpoint();
@@ -75,7 +77,9 @@ std::future<void> Database::checkpoint_async() {
         auto checkpoint = std::move(work);
         for (;;) {
             store->write_checkpoint(*checkpoint, *state);
+            const auto start = detail::MaintenanceClock::now();
             std::lock_guard lock(owner->commit_mutex);
+            store->checkpoint_publish_wait_ns += detail::elapsed_ns(start);
             detail::healthy(owner);
             if (!store->ready_to_publish(*checkpoint))
                 continue;

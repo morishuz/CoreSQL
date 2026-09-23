@@ -109,7 +109,7 @@ DurableStore::DurableStore(const std::filesystem::path& path, bool create_only)
     if (fd_ < 0)
         io("Open database");
     try {
-        struct stat status{};
+        struct stat status {};
         if (::fstat(fd_, &status) < 0)
             io("Stat database");
         if (!S_ISREG(status.st_mode))
@@ -119,7 +119,7 @@ DurableStore::DurableStore(const std::filesystem::path& path, bool create_only)
             throw Error(ErrorCode::conflict, "Database is already open; only one owner is supported");
         // A checkpoint can replace the pathname while an opener holds the old
         // inode. Never admit that stale inode after obtaining its lock.
-        struct stat named{};
+        struct stat named {};
         if (::lstat(path.c_str(), &named) < 0)
             io("Stat database path");
         if (named.st_dev != status.st_dev || named.st_ino != status.st_ino)
@@ -146,7 +146,7 @@ DurableStore::~DurableStore() {
         ::close(fd_);
 }
 State DurableStore::recover(const Registry& registry, const std::shared_ptr<Pager>& pager) {
-    struct stat status{};
+    struct stat status {};
     if (::fstat(fd_, &status) < 0)
         io("Stat database");
     if (status.st_size < 8)
@@ -256,11 +256,12 @@ void DurableStore::commit(const State& base, const State& next) {
     if (failed)
         throw Error(ErrorCode::state, "Database must be reopened after I/O failure");
     if (base.schema_epoch != next.schema_epoch) {
+        ++automatic_checkpoints;
         checkpoint_locked(next);
         return;
     }
     auto payload = encode_changes(base, next); // Allocation/encoding fails before I/O.
-    struct stat status{};
+    struct stat status {};
     if (::fstat(fd_, &status) < 0)
         io("Stat database");
     const auto live = checkpoint_size(next) + 32;
@@ -268,6 +269,7 @@ void DurableStore::commit(const State& base, const State& next) {
     // rewriting tiny databases too frequently. Shrinking data triggers cleanup.
     const auto threshold = std::max<std::uint64_t>(1024 * 1024, 4 * live);
     if (static_cast<std::uint64_t>(status.st_size) + payload.size() + 24 > threshold) {
+        ++automatic_checkpoints;
         checkpoint_locked(next);
         return;
     }
@@ -296,7 +298,7 @@ void DurableStore::checkpoint_locked(const State& state) {
             io("Lock checkpoint");
         point("checkpoint_created");
         write_all(fresh, std::as_bytes(std::span(magic.data(), magic.size())), bytes_written);
-        auto built = std::make_unique<CheckpointImages>();
+        auto built = std::make_shared<CheckpointImages>();
         append_checkpoint(fresh, state, images_.get(), image_fd_, built.get());
         point("checkpoint_synced");
         if (::rename(temporary.c_str(), path_.c_str()) < 0)
@@ -313,7 +315,10 @@ void DurableStore::checkpoint_locked(const State& state) {
         ::close(old);
         retain_images(std::move(built));
         point("checkpoint_renamed");
-        sync_directory(path_);
+        {
+            MaintenanceTimer sync(checkpoint_directory_ns);
+            sync_directory(path_);
+        }
         ++checkpoints;
         point("checkpoint_directory_synced");
     } catch (...) {
@@ -329,7 +334,7 @@ void DurableStore::checkpoint_locked(const State& state) {
 // A frame's exact size is known only after streaming the body. Until the complete
 // body is written the temporary file is unpublished, so patch its frame header
 // before the first synchronization and retain the usual two-sync commit protocol.
-void DurableStore::retain_images(std::unique_ptr<CheckpointImages> built) {
+void DurableStore::retain_images(std::shared_ptr<const CheckpointImages> built) {
     if (image_fd_ >= 0)
         ::close(image_fd_);
     image_fd_ = ::fcntl(fd_, F_DUPFD_CLOEXEC, 0);
@@ -342,6 +347,7 @@ void DurableStore::retain_images(std::unique_ptr<CheckpointImages> built) {
 }
 void DurableStore::append_checkpoint(int fd, const State& state, const CheckpointImages* reuse, int reuse_fd,
                                      CheckpointImages* built) {
+    MaintenanceTimer timer(checkpoint_encode_ns);
     const auto header_offset = ::lseek(fd, 0, SEEK_CUR);
     if (header_offset < 0)
         io("Seek checkpoint");
@@ -364,12 +370,17 @@ void DurableStore::append_checkpoint(int fd, const State& state, const Checkpoin
                 point("half_payload");
             }
         },
-        [&](const Chunk& chunk, const std::function<void(ByteView)>& emit) {
-            if (!reuse || reuse_fd < 0)
+        [&](std::uint64_t identity, const std::function<void(ByteView)>& emit) {
+            if (!reuse || reuse_fd < 0) {
+                ++checkpoint_encoded_chunks;
                 return false;
-            auto found = reuse->span.find(chunk.encoding_id);
-            if (found == reuse->span.end() || found->second.second == 0)
+            }
+            auto found = reuse->span.find(identity);
+            if (found == reuse->span.end() || found->second.second == 0) {
+                ++checkpoint_encoded_chunks;
                 return false;
+            }
+            ++checkpoint_reused_chunks;
             std::array<std::byte, 64 * 1024> buffer{};
             auto remaining = found->second.second;
             auto offset = static_cast<off_t>(found->second.first);
@@ -382,9 +393,9 @@ void DurableStore::append_checkpoint(int fd, const State& state, const Checkpoin
             }
             return true;
         },
-        [&](const Chunk& chunk, std::uint64_t offset, std::uint64_t length) {
+        [&](std::uint64_t identity, std::uint64_t offset, std::uint64_t length) {
             if (built && length)
-                built->span[chunk.encoding_id] = {origin + offset, length};
+                built->span[identity] = {origin + offset, length};
         });
     point("payload");
     Bytes header;
@@ -402,7 +413,10 @@ void DurableStore::append_checkpoint(int fd, const State& state, const Checkpoin
         bytes_written += static_cast<std::uint64_t>(n);
         remaining = remaining.subspan(static_cast<std::size_t>(n));
     }
-    synchronize(fd);
+    {
+        MaintenanceTimer sync(checkpoint_sync_ns);
+        synchronize(fd);
+    }
     point("payload_synced");
     auto marker = std::as_bytes(std::span(committed.data(), committed.size()));
     write_all(fd, marker.first(4), bytes_written);
@@ -410,7 +424,10 @@ void DurableStore::append_checkpoint(int fd, const State& state, const Checkpoin
     write_all(fd, marker.subspan(4), bytes_written);
     point("footer");
     point("before_sync");
-    synchronize(fd);
+    {
+        MaintenanceTimer sync(checkpoint_sync_ns);
+        synchronize(fd);
+    }
     point("synced");
 }
 
@@ -429,6 +446,7 @@ DurableStore::Checkpoint::~Checkpoint() {
     }
 }
 std::unique_ptr<DurableStore::Checkpoint> DurableStore::prepare_checkpoint() {
+    MaintenanceTimer timer(checkpoint_prepare_ns);
     auto task = std::unique_ptr<Checkpoint>(new Checkpoint(*this));
     std::lock_guard lock(io_mutex_);
     // Only a successful reservation belongs to the token's destructor.
@@ -449,7 +467,7 @@ std::unique_ptr<DurableStore::Checkpoint> DurableStore::prepare_checkpoint() {
     task->generation_ = generation_;
     task->copied_ = committed_end_;
     if (images_)
-        task->reuse_ = std::make_unique<CheckpointImages>(*images_);
+        task->reuse_ = images_;
     task->owner_ = this;
     background_active_ = true;
     return task;
@@ -463,6 +481,7 @@ void DurableStore::copy_tail(Checkpoint& task, std::int64_t end) {
         read_at(task.source_, bytes, static_cast<off_t>(task.copied_));
         write_all(task.fresh_, bytes, bytes_written);
         task.copied_ += static_cast<std::int64_t>(count);
+        checkpoint_catchup_bytes += count;
     }
 }
 void DurableStore::write_checkpoint(Checkpoint& task, const State& state) {
@@ -471,7 +490,7 @@ void DurableStore::write_checkpoint(Checkpoint& task, const State& state) {
     if (!task.ready_) {
         point("background_checkpoint_created");
         write_all(task.fresh_, std::as_bytes(std::span(magic.data(), magic.size())), bytes_written);
-        task.built_ = std::make_unique<CheckpointImages>();
+        task.built_ = std::make_shared<CheckpointImages>();
         append_checkpoint(task.fresh_, state, task.reuse_.get(), task.source_, task.built_.get());
         point("background_checkpoint_encoded");
     }
@@ -486,8 +505,13 @@ void DurableStore::write_checkpoint(Checkpoint& task, const State& state) {
     }
     // Copy only acknowledged records. Their bytes never change on this inode,
     // even if a synchronous checkpoint replaces the pathname in the meantime.
+    MaintenanceTimer timer(checkpoint_catchup_ns);
+    ++checkpoint_catchup_passes;
     copy_tail(task, end);
-    synchronize(task.fresh_);
+    {
+        MaintenanceTimer sync(checkpoint_sync_ns);
+        synchronize(task.fresh_);
+    }
     task.ready_ = true;
     point("background_checkpoint_ready");
 }
@@ -498,13 +522,16 @@ bool DurableStore::ready_to_publish(const Checkpoint& task) {
     return task.generation_ != generation_ || (task.ready_ && committed_end_ - task.copied_ <= 256 * 1024);
 }
 bool DurableStore::publish_checkpoint(Checkpoint& task) {
+    MaintenanceTimer timer(checkpoint_publish_ns);
     std::lock_guard lock(io_mutex_);
     if (task.owner_ != this)
         throw Error(ErrorCode::state, "Invalid background checkpoint token");
     if (failed)
         throw Error(ErrorCode::state, "Database must be reopened after I/O failure");
-    if (task.generation_ != generation_)
+    if (task.generation_ != generation_) {
+        ++superseded_checkpoints;
         return false;
+    }
     if (!task.ready_)
         throw Error(ErrorCode::state, "Background checkpoint has not been encoded");
     if (committed_end_ - task.copied_ > 256 * 1024)
@@ -512,7 +539,10 @@ bool DurableStore::publish_checkpoint(Checkpoint& task) {
     // Allocation-free final catch-up while commits are excluded. Earlier copies
     // and most I/O happened outside this short publication boundary.
     copy_tail(task, committed_end_);
-    synchronize(task.fresh_);
+    {
+        MaintenanceTimer sync(checkpoint_sync_ns);
+        synchronize(task.fresh_);
+    }
     point("background_checkpoint_synced");
     try {
         if (::rename(task.temporary_.c_str(), path_.c_str()) < 0)
@@ -528,9 +558,13 @@ bool DurableStore::publish_checkpoint(Checkpoint& task) {
         ::close(old);
         retain_images(std::move(task.built_));
         point("background_checkpoint_renamed");
-        sync_directory(path_);
+        {
+            MaintenanceTimer sync(checkpoint_directory_ns);
+            sync_directory(path_);
+        }
         ++checkpoints;
         point("background_checkpoint_directory_synced");
+        ++background_checkpoints;
     } catch (...) {
         failed = true;
         throw;

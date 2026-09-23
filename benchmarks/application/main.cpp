@@ -58,9 +58,14 @@ struct Workload {
             return;
         const auto [rss, peak] = memory();
         std::uint64_t files = 0;
-        for (const auto& entry : std::filesystem::directory_iterator(engine.path.parent_path()))
-            if (entry.is_regular_file())
-                files += entry.file_size();
+        for (const auto& entry : std::filesystem::directory_iterator(engine.path.parent_path())) {
+            std::error_code error;
+            const auto bytes = entry.file_size(error);
+            if (!error)
+                files += bytes;
+            else if (error != std::errc::no_such_file_or_directory)
+                throw std::filesystem::filesystem_error("Measure benchmark file", entry.path(), error);
+        }
         CacheStats cache{};
         StorageStats storage{};
         if (engine.core) {
@@ -87,12 +92,14 @@ struct Workload {
         engine.exec("COMMIT");
         const auto committed = Clock::now();
         if (maintain)
-            engine.checkpoint();
+            engine.request_checkpoint();
+        if (engine.background)
+            engine.poll();
         const auto end = Clock::now();
         emit(phase + "_execute", i, elapsed(start, executed), units);
         emit(phase + "_commit", i, elapsed(executed, committed));
         if (maintain)
-            emit("checkpoint", i, elapsed(committed, end));
+            emit(engine.background ? "checkpoint_request" : "checkpoint", i, elapsed(committed, end));
         emit(phase, i, elapsed(start, end), units);
     }
     void seed() {
@@ -251,7 +258,50 @@ struct Workload {
     void run() {
         seed();
         reads();
+        const auto initial_maintenance = engine.core ? engine.db->storage_stats() : StorageStats{};
+        engine.start_measurement();
+        const auto workload_start = Clock::now();
         writes();
+        const auto drain_start = Clock::now();
+        engine.drain();
+        emit("maintenance_drain", 0, elapsed(drain_start, Clock::now()));
+        emit("write_workload_wall", 0, elapsed(workload_start, Clock::now()));
+        const auto maintenance_stats = engine.core ? engine.db->storage_stats() : StorageStats{};
+        std::cerr
+            << "CORE_CHECKPOINT_METRICS" << " checkpoint_prepare_ns="
+            << (maintenance_stats.checkpoint_prepare_ns - initial_maintenance.checkpoint_prepare_ns)
+            << " checkpoint_encode_ns="
+            << (maintenance_stats.checkpoint_encode_ns - initial_maintenance.checkpoint_encode_ns)
+            << " checkpoint_catchup_ns="
+            << (maintenance_stats.checkpoint_catchup_ns - initial_maintenance.checkpoint_catchup_ns)
+            << " checkpoint_publish_ns="
+            << (maintenance_stats.checkpoint_publish_ns - initial_maintenance.checkpoint_publish_ns)
+            << " checkpoint_capture_wait_ns="
+            << (maintenance_stats.checkpoint_capture_wait_ns - initial_maintenance.checkpoint_capture_wait_ns)
+            << " checkpoint_publish_wait_ns="
+            << (maintenance_stats.checkpoint_publish_wait_ns - initial_maintenance.checkpoint_publish_wait_ns)
+            << " checkpoint_sync_ns="
+            << (maintenance_stats.checkpoint_sync_ns - initial_maintenance.checkpoint_sync_ns)
+            << " checkpoint_directory_ns="
+            << (maintenance_stats.checkpoint_directory_ns - initial_maintenance.checkpoint_directory_ns)
+            << " checkpoint_catchup_bytes="
+            << (maintenance_stats.checkpoint_catchup_bytes - initial_maintenance.checkpoint_catchup_bytes)
+            << " checkpoint_catchup_passes="
+            << (maintenance_stats.checkpoint_catchup_passes - initial_maintenance.checkpoint_catchup_passes)
+            << " background_checkpoints="
+            << (maintenance_stats.background_checkpoints - initial_maintenance.background_checkpoints)
+            << " superseded_checkpoints="
+            << (maintenance_stats.superseded_checkpoints - initial_maintenance.superseded_checkpoints)
+            << " automatic_checkpoints="
+            << (maintenance_stats.automatic_checkpoints - initial_maintenance.automatic_checkpoints)
+            << " checkpoint_reused_chunks="
+            << (maintenance_stats.checkpoint_reused_chunks - initial_maintenance.checkpoint_reused_chunks)
+            << " checkpoint_encoded_chunks="
+            << (maintenance_stats.checkpoint_encoded_chunks - initial_maintenance.checkpoint_encoded_chunks)
+            << '\n';
+        std::cerr << "MAINTENANCE requested=" << engine.requested << " started=" << engine.started
+                  << " completed=" << engine.completed << " coalesced=" << engine.coalesced
+                  << " busy_retries=" << engine.busy_retries.load() << '\n';
         verify();
         engine.integrity();
         if (engine.durable && only == "all") {
@@ -269,11 +319,21 @@ struct Workload {
 } // namespace
 int main(int argc, char** argv) {
     try {
-        check(argc == 9 || argc == 10,
+        check(argc >= 9 && argc <= 12,
               "Usage: application ENGINE memory|durable ROWS PAYLOAD_BYTES OPERATIONS CACHE_MIB "
-              "SCRATCH_DIR PHASE|all [covering]");
-        const bool covering = argc == 10;
-        check(!covering || std::string(argv[9]) == "covering", "Unknown index variant");
+              "SCRATCH_DIR PHASE|all [covering] [background|adaptive]");
+        bool covering = false, background = false, adaptive = false;
+        for (int i = 9; i < argc; ++i) {
+            const std::string option(argv[i]);
+            if (option == "covering")
+                covering = true;
+            else if (option == "background")
+                background = true;
+            else if (option == "adaptive")
+                background = adaptive = true;
+            else
+                throw std::runtime_error("Unknown benchmark option");
+        }
         const std::string engine = argv[1], mode = argv[2];
         const auto rows = std::stoll(argv[3]), payload = std::stoll(argv[4]), ops = std::stoll(argv[5]),
                    cache = std::stoll(argv[6]);
@@ -290,11 +350,16 @@ int main(int argc, char** argv) {
               "Unknown phase");
         Temporary temp(argv[7]);
         Backend backend(engine == "coresql", mode == "durable", static_cast<std::size_t>(cache) * 1024 * 1024,
-                        temp.path / "db");
+                        temp.path / "db", background, adaptive);
         std::cerr
             << "SQLite " << sqlite3_sourceid() << "; compiler=" << __VERSION__
             << "; SQL template cache disabled; prepared SQL; SQLite WAL/FULL/fullfsync/checkpoint_fullfsync; "
-               "synchronous checkpoints every 50 mixed transactions\n";
+               "checkpoints every 50 mixed transactions\n";
+        std::cerr << "Checkpoint mode: "
+                  << (adaptive     ? "adaptive"
+                      : background ? "background"
+                                   : "foreground")
+                  << '\n';
         std::cout << "phase,sample,milliseconds,units,rss_bytes,peak_rss_bytes,file_bytes,core_page_reads,"
                      "core_page_writes,core_written_bytes,core_checkpoints\n";
         std::cerr << "Event index: " << (covering ? "(device,ts,id)" : "(device,ts)") << '\n';

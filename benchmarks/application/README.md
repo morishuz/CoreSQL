@@ -130,3 +130,32 @@ checks and parameter generation remain, so attribute engine stack frames separat
 from harness costs. Profile separately from timing, and retain traces privately.
 Stopping a profiling process forcibly may leave its uniquely named scratch directory;
 remove that directory only after the process has exited.
+
+### Background checkpoint comparison
+
+Pass `--background-checkpoints --phase mixed` to `run.py` to use background
+maintenance in both engines. The binary accepts the trailing `background` flag.
+Requests occur every 50 mixed transactions. One job runs at a time, overlapping
+requests are coalesced, and every future is observed for errors. CoreSQL enables
+concurrent-safe callbacks; SQLite uses a separate checkpoint connection with
+FULL/fullfsync/checkpoint_fullfsync and TRUNCATE checkpoints. SQLite durable write
+transactions use BEGIN IMMEDIATE in both modes so checkpoint contention is
+included in latency rather than failing a deferred read-to-write upgrade.
+
+`checkpoint_request` measures foreground request/poll overhead, not completed
+maintenance. `maintenance_drain` reports the final wait for outstanding work;
+`write_workload_wall` includes verification, measurement gaps and that drain.
+The stderr record reports requested/started/completed/coalesced jobs and SQLite
+busy retries. CoreSQL maintenance counters report encoding, catch-up, publication,
+lock waits and reuse; durations include nested I/O and must not be added together.
+File-size observations are sampled and can miss transient peaks; private page
+backing is not included in that file-size column. Compare foreground and background
+modes separately and account for differing completed checkpoint counts.
+
+`--adaptive-checkpoints` (binary flag `adaptive`) instead checks every 50 mixed
+transactions for log growth above half the initial compacted file size (minimum
+1 MiB), or nonzero growth after one second. This is an explicit benchmark policy,
+not a new automatic engine default. It uses the same one-job/coalescing mechanism.
+CoreSQL's hard retained-history bound remains active and its automatic checkpoint
+counter reveals foreground fallbacks. Changing data size can require a different
+application policy; initial compacted size is only a fixed-fixture estimate.

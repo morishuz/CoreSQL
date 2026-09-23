@@ -3,11 +3,25 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <chrono>
 
 #ifndef CORESQL_MAX_ENCODED_MIB
 #define CORESQL_MAX_ENCODED_MIB 1024
 #endif
 namespace coresql::detail {
+using MaintenanceClock = std::chrono::steady_clock;
+inline std::uint64_t elapsed_ns(MaintenanceClock::time_point start) {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(MaintenanceClock::now() - start).count());
+}
+class MaintenanceTimer {
+    std::atomic<std::uint64_t>& counter_;
+    MaintenanceClock::time_point start_ = MaintenanceClock::now();
+
+public:
+    explicit MaintenanceTimer(std::atomic<std::uint64_t>& counter) : counter_(counter) {}
+    ~MaintenanceTimer() { counter_.fetch_add(elapsed_ns(start_), std::memory_order_relaxed); }
+};
 inline constexpr std::size_t max_encoded_bytes = std::size_t{CORESQL_MAX_ENCODED_MIB} * 1024 * 1024;
 Bytes encode(const State&);
 void validate_snapshot(ByteView);
@@ -21,8 +35,8 @@ Bytes encode_changes(const State& base, const State& next);
 // note observes each emitted chunk record at its payload-relative offset.
 void encode_checkpoint(
     const State&, const std::function<void(ByteView)>& sink,
-    const std::function<bool(const Chunk&, const std::function<void(ByteView)>&)>& reuse = {},
-    const std::function<void(const Chunk&, std::uint64_t offset, std::uint64_t length)>& note = {});
+    const std::function<bool(std::uint64_t, const std::function<void(ByteView)>&)>& reuse = {},
+    const std::function<void(std::uint64_t identity, std::uint64_t offset, std::uint64_t length)>& note = {});
 class Pager;
 struct CheckpointImages;
 State apply_changes(const State& base, ByteView, const Registry&, const std::shared_ptr<Pager>& = {});
@@ -43,7 +57,8 @@ public:
         std::int64_t copied_ = 0;
         bool ready_ = false;
         std::filesystem::path temporary_;
-        std::unique_ptr<CheckpointImages> reuse_, built_;
+        std::shared_ptr<const CheckpointImages> reuse_;
+        std::shared_ptr<CheckpointImages> built_;
     };
     explicit DurableStore(const std::filesystem::path&, bool create_only = false);
     ~DurableStore();
@@ -64,6 +79,21 @@ public:
     // False means a newer synchronous checkpoint already superseded this one.
     bool publish_checkpoint(Checkpoint&);
     std::atomic<std::uint64_t> bytes_written{0}, checkpoints{0};
+    std::atomic<std::uint64_t> checkpoint_prepare_ns{0};
+    std::atomic<std::uint64_t> checkpoint_encode_ns{0};
+    std::atomic<std::uint64_t> checkpoint_catchup_ns{0};
+    std::atomic<std::uint64_t> checkpoint_publish_ns{0};
+    std::atomic<std::uint64_t> checkpoint_capture_wait_ns{0};
+    std::atomic<std::uint64_t> checkpoint_publish_wait_ns{0};
+    std::atomic<std::uint64_t> checkpoint_sync_ns{0};
+    std::atomic<std::uint64_t> checkpoint_directory_ns{0};
+    std::atomic<std::uint64_t> checkpoint_catchup_bytes{0};
+    std::atomic<std::uint64_t> checkpoint_catchup_passes{0};
+    std::atomic<std::uint64_t> background_checkpoints{0};
+    std::atomic<std::uint64_t> superseded_checkpoints{0};
+    std::atomic<std::uint64_t> automatic_checkpoints{0};
+    std::atomic<std::uint64_t> checkpoint_reused_chunks{0};
+    std::atomic<std::uint64_t> checkpoint_encoded_chunks{0};
     std::atomic<bool> failed{false};
 
 private:
@@ -72,14 +102,14 @@ private:
     void append(int fd, ByteView);
     void append_checkpoint(int fd, const State&, const CheckpointImages*, int reuse_fd,
                            CheckpointImages* built);
-    void retain_images(std::unique_ptr<CheckpointImages> built);
+    void retain_images(std::shared_ptr<const CheckpointImages> built);
     void checkpoint_locked(const State&);
     void copy_tail(Checkpoint&, std::int64_t end);
     std::mutex io_mutex_;
     std::uint64_t generation_ = 0;
     std::int64_t committed_end_ = 8;
     int image_fd_ = -1;
-    std::unique_ptr<CheckpointImages> images_;
+    std::shared_ptr<const CheckpointImages> images_;
     std::uint64_t recovery_fingerprint_ = 14695981039346656037ULL;
     bool background_active_ = false;
 };
