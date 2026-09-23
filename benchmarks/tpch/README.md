@@ -3,7 +3,7 @@
 Run the 22 checksum-pinned DuckDB queries against CoreSQL and optional reference
 engines. The [README table](../../README.md#performance) uses the
 [September 23, 2026 measurements](results/tpch-2026-09-23-sf0.03.json) at
-SF 0.03 on CoreSQL `fd5ac5fe9c`. The report includes raw repetitions,
+SF 0.03 on CoreSQL `038e74c573`. The report includes raw repetitions,
 answer checks, the dataset manifest and build fingerprints. The
 [September 15 comparison](results/OPTIMIZATION_ROUND2.md) is retained as historical
 evidence. This is an engineering comparison, not an official
@@ -244,7 +244,7 @@ library/adapter fingerprints and explicit engine order. The raw field
 CoreSQL speedup, below 1 means CoreSQL is slower. The three drivers have different
 result-conversion overhead, so this remains a client-latency comparison.
 
-See [the latest three-engine table](../../README.md#performance).
+See [the latest timing table](../../README.md#performance).
 
 ### Inspect execution work
 

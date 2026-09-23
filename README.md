@@ -65,59 +65,46 @@ and callback scan streaming.
 
 ## Performance
 
-The latest full **TPC-H Q1–Q22** comparison was measured September 23, 2026,
-at **SF 0.03** (180,566 lineitems), using CoreSQL commit `fd5ac5fe9c`.
-CoreSQL completed and checked all 22 queries. SQLite completed 20: CoreSQL was
-faster on 15, SQLite on five; SQLite hit the 15-second timeout on Q19 and Q21.
-DuckDB was faster than CoreSQL on all 22 queries.
+Single-threaded, in-memory **TPC-H Q1–Q22** at SF 0.03 (180,566 lineitems),
+measured September 23, 2026 on an Apple M1 with 16 GiB RAM.
 
-These are single-thread, in-memory client timings on an Apple M1 with 16 GiB RAM:
-median of three measured runs after one warmup, excluding loading. Parsing,
-execution and fetching are included. **SQLite uses adapted SQL, TEXT dates and
-approximate REAL decimals; CoreSQL and DuckDB use native DATE/DECIMAL.** Drivers
-also differ. This is an engineering comparison, not an official TPC-H result,
-a durability benchmark, or evidence of general superiority.
+Times are medians of three runs after one warmup, including parsing, execution
+and fetching but excluding loading. **Ratios above 1× mean CoreSQL is faster.**
 
 <details>
 <summary>All 22 query times — milliseconds, lower is better</summary>
 
-| Query | CoreSQL ms | SQLite ms | SQLite ms / CoreSQL ms | DuckDB ms |
-| --- | ---: | ---: | ---: | ---: |
-| Q1 | 106.300 | 90.900 | 0.86× | 6.312 |
-| Q2 | 23.542 | 19.524 | 0.83× | 1.965 |
-| Q3 | 23.870 | 47.900 | 2.01× | 1.524 |
-| Q4 | 17.598 | 37.976 | 2.16× | 1.857 |
-| Q5 | 30.974 | 65.812 | 2.12× | 2.131 |
-| Q6 | 18.648 | 11.648 | 0.62× | 0.512 |
-| Q7 | 38.794 | 57.164 | 1.47× | 2.793 |
-| Q8 | 21.514 | 126.984 | 5.90× | 2.787 |
-| Q9 | 47.590 | 171.599 | 3.61× | 5.170 |
-| Q10 | 21.979 | 19.184 | 0.87× | 4.291 |
-| Q11 | 4.902 | 24.453 | 4.99× | 2.245 |
-| Q12 | 20.895 | 23.133 | 1.11× | 3.616 |
-| Q13 | 38.959 | 46.179 | 1.19× | 4.924 |
-| Q14 | 10.443 | 11.533 | 1.10× | 0.917 |
-| Q15 | 10.258 | 11.595 | 1.13× | 0.947 |
-| Q16 | 7.826 | 10.840 | 1.39× | 1.672 |
-| Q17 | 14.819 | 803.753 | 54.24× | 1.431 |
-| Q18 | 81.326 | 73.726 | 0.91× | 3.517 |
-| Q19 | 16.919 | Timeout (>15 s) | — | 6.587 |
-| Q20 | 13.209 | 1270.208 | 96.17× | 1.760 |
-| Q21 | 513.586 | Timeout (>15 s) | — | 4.690 |
-| Q22 | 7.923 | 336.730 | 42.50× | 1.368 |
+| Query | CoreSQL ms | SQLite ms | SQLite ms / CoreSQL ms |
+| --- | ---: | ---: | ---: |
+| Q1 | 112.804 | 88.198 | 0.78× |
+| Q2 | 24.016 | 19.835 | 0.83× |
+| Q3 | 24.523 | 47.998 | 1.96× |
+| Q4 | 18.402 | 37.840 | 2.06× |
+| Q5 | 29.636 | 65.294 | 2.20× |
+| Q6 | 18.791 | 11.648 | 0.62× |
+| Q7 | 39.204 | 58.406 | 1.49× |
+| Q8 | 20.295 | 122.424 | 6.03× |
+| Q9 | 44.552 | 151.852 | 3.41× |
+| Q10 | 22.987 | 18.921 | 0.82× |
+| Q11 | 5.076 | 24.481 | 4.82× |
+| Q12 | 21.579 | 23.210 | 1.08× |
+| Q13 | 40.414 | 46.131 | 1.14× |
+| Q14 | 10.476 | 12.223 | 1.17× |
+| Q15 | 10.039 | 11.896 | 1.19× |
+| Q16 | 8.069 | 10.680 | 1.32× |
+| Q17 | 15.422 | 821.612 | 53.27× |
+| Q18 | 49.818 | 70.797 | 1.42× |
+| Q19 | 17.237 | Timeout (>15 s) | — |
+| Q20 | 12.852 | 1303.171 | 101.40× |
+| Q21 | 508.635 | Timeout (>15 s) | — |
+| Q22 | 8.704 | 364.444 | 41.87× |
 
-**SQLite ms / CoreSQL ms** is the ratio of the measured medians: above 1 means
-CoreSQL is faster; below 1 means SQLite is faster. No ratio is assigned to timeouts.
-SQLite is the pinned 3.54.0 development baseline, not a stable-release comparison;
-DuckDB is 1.5.5. CoreSQL used a clean,
-test-enabled Release build with AppleClang 21.0.0 on macOS 27.0. Three trials do not
-establish a stable ranking for close results. The OS differs from
-the historical September 15 comparison, so changes between those runs cannot be
-attributed solely to CoreSQL changes.
+CoreSQL `038e74c573`; pinned SQLite 3.54.0 development build.
+SQLite uses adapted SQL with TEXT dates and approximate REAL decimals; CoreSQL
+uses native DATE/DECIMAL. Driver overhead differs. This is not an official TPC-H result.
 
-[Methodology and reproduction](benchmarks/tpch/README.md#bounded-performance-comparison)
-· [Raw measurements, dataset manifest and fingerprints](benchmarks/tpch/results/tpch-2026-09-23-sf0.03.json)
-· [Historical September 15 comparison](benchmarks/tpch/results/OPTIMIZATION_ROUND2.md)
+[Methodology](benchmarks/tpch/README.md#bounded-performance-comparison)
+· [Raw measurements](benchmarks/tpch/results/tpch-2026-09-23-sf0.03.json)
 
 </details>
 

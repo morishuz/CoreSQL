@@ -15,20 +15,15 @@ python3 benchmarks/application/run.py --binary build/compare/coresql_application
   --output /tmp/application-results --operations 1000 --runs 3
 ```
 
-The output directory must be new. It holds raw per-operation CSV, stderr,
-source/binary fingerprints, host metadata, per-run distributions and a compact
-comparison. Keep experimental measurements outside the tracked source tree.
-Build options are recorded when the executable has a neighboring CMake cache.
-The default `BUILD_TESTING=ON` includes inactive engine diagnostic counters; keep
-that setting consistent across revision comparisons, or use a separate
-`-DBUILD_TESTING=OFF` build for production-only timings.
-The supervisor alternates engine order and runs fresh processes/databases
-serially. Do not build, profile or run other benchmarks during timed runs.
-The runner sets `TMPDIR` to the output directory, keeping CoreSQL scratch backing
-and database files on the same volume. Record that filesystem and storage device
-when publishing results. For direct executable runs, set `TMPDIR` explicitly.
-A failed or timed-out run receives no speed ratio. The runner requires a Git
-checkout for revision metadata; the executable also works from a source archive.
+Use a new output directory. Results include per-operation CSV, latency distributions,
+source/binary fingerprints, host metadata and a comparison. The runner alternates
+engines in fresh processes and sets `TMPDIR` to the output directory. Record its
+filesystem/device and keep other benchmarks, builds and profilers idle during timing.
+Keep measurements outside the tracked source tree. Revision metadata requires a
+Git checkout; the executable also works from a source archive.
+
+Build options are recorded from the neighboring CMake cache. Keep `BUILD_TESTING`
+consistent across comparisons; `OFF` excludes engine diagnostic counters.
 
 ## Fixture and operations
 
@@ -98,22 +93,17 @@ indexes, dirty chunks, metadata and query buffers. SQLite caches encoded pages;
 equal numeric cache settings do not imply equal total memory. OS filesystem caches
 are not flushed. In-memory SQLite cannot evict its database to a durable file.
 
-CSV reports current RSS and process peak RSS outside each timed sample. Peak RSS
-includes setup, verification and all earlier phases; current RSS is not exact live
-allocation accounting. File bytes sum regular files in the run's database directory
-and exclude unlinked scratch files and transient checkpoint peaks. CoreSQL I/O
-counters are cumulative session counters, reset on reopen; bytes written are bytes
-submitted to file writes, not physical device traffic. Counter differences between
-first/last phase samples exclude the first operation.
+CSV reports current and peak RSS outside timed samples. Peak RSS includes setup,
+verification and earlier phases. File bytes exclude unlinked scratch files and can
+miss transient checkpoint peaks. CoreSQL I/O counters count submitted bytes, not
+physical device traffic; they reset on reopen. First-to-last sample differences
+exclude the first operation.
 
-`*_execute`, `*_commit` and total transaction samples overlap: do not sum all three.
-Throughput is work units divided by summed timed duration, excluding checking and
-measurement gaps, **not end-to-end wall-clock throughput**. A read unit is one query;
-write units are affected/attempted rows; mixed units are ten SQL statements. Compare like phases.
-The report uses nearest-rank p50/p95/p99 and retains each process separately. It
-omits p95 below 20 samples and p99 below 100. Even 1,000 observations provide only
-a preliminary tail estimate. Reopen and checkpoint maxima must not be presented
-as established worst-case latency bounds.
+`*_execute`, `*_commit` and total samples overlap: do not sum them. Throughput uses
+summed timed intervals, excluding verification and measurement gaps. Read units
+are queries, write units are affected/attempted rows, and mixed units are ten SQL
+statements. Compare like phases. Reports use nearest-rank percentiles, omitting
+p95 below 20 samples and p99 below 100; these are estimates, not latency bounds.
 
 ## Profiling
 
@@ -124,15 +114,13 @@ CORESQL_APPLICATION_PROFILE=1 ./build/compare/coresql_application_benchmark \
   coresql memory 100000 1024 100000 0 /tmp point_read
 ```
 
-Wait for `PHASE_READY point_read` on stderr before attaching a CPU profiler.
-Supported phase names appear in `main.cpp`; `all` runs the full sequence. The
-environment switch suppresses CSV/RSS/file-stat reporting for profiling. Correctness
-checks and parameter generation remain, so attribute engine stack frames separately
-from harness costs. Profile separately from timing, and retain traces privately.
-Stopping a profiling process forcibly may leave its uniquely named scratch directory;
-remove that directory only after the process has exited.
+Attach a profiler after `PHASE_READY point_read` appears on stderr. Phase names
+are in `main.cpp`; `all` runs the default sequence. Profiling suppresses CSV, RSS
+and file-stat reporting but retains verification and parameter generation. Keep
+profiles private and separate from timings. After forcibly stopping a process,
+remove its scratch directory only once it has exited.
 
-### Background checkpoint comparison
+## Background checkpoints
 
 Pass `--background-checkpoints --phase mixed` to `run.py` to use background
 maintenance in both engines. The binary accepts the trailing `background` flag.
@@ -143,39 +131,28 @@ FULL/fullfsync/checkpoint_fullfsync and TRUNCATE checkpoints. SQLite durable wri
 transactions use BEGIN IMMEDIATE in both modes so checkpoint contention is
 included in latency rather than failing a deferred read-to-write upgrade.
 
-`checkpoint_request` measures foreground request/poll overhead, not completed
-maintenance. `maintenance_drain` reports the final wait for outstanding work;
-`write_workload_wall` includes verification, measurement gaps and that drain.
-The stderr record reports requested/started/completed/coalesced jobs and SQLite
-busy retries. CoreSQL maintenance counters report encoding, catch-up, publication,
-lock waits and reuse; durations include nested I/O and must not be added together.
-File-size observations are sampled and can miss transient peaks; private page
-backing is not included in that file-size column. Compare foreground and background
-modes separately and account for differing completed checkpoint counts.
+`checkpoint_request` measures request/poll overhead; `maintenance_drain` measures
+the final wait. `write_workload_wall` includes verification, measurement gaps and
+the drain. Stderr reports requested/started/completed/coalesced jobs and SQLite
+busy retries. CoreSQL maintenance durations include nested I/O: do not sum them.
+Compare completed checkpoint counts as well as transaction latency.
 
-`--adaptive-checkpoints` (binary flag `adaptive`) instead checks every 50 mixed
-transactions for log growth above half the initial compacted file size (minimum
-1 MiB), or nonzero growth after one second. This is an explicit benchmark policy,
-not a new automatic engine default. It uses the same one-job/coalescing mechanism.
-CoreSQL's hard retained-history bound remains active and its automatic checkpoint
-counter reveals foreground fallbacks. Changing data size can require a different
-application policy; initial compacted size is only a fixed-fixture estimate.
+`--adaptive-checkpoints` (binary flag `adaptive`) checks every 50 mixed transactions
+for log growth above half the initial compacted file size (minimum 1 MiB), or
+nonzero growth after one second. This benchmark policy uses the same background
+scheduler; it does not change engine defaults. CoreSQL's retained-history bound
+remains active; its automatic-checkpoint counter reveals foreground fallbacks.
 
-### Durable transaction batching
+## Transaction batching
 
-Use `--phase batch_updates` for a separate family of 1, 4, 16 and 64 changed-row
-updates per transaction, using existing transaction APIs in both engines. Each
-phase executes `--operations` batches, so larger batches perform more row updates.
-All rows are checked after each phase, and durable runs verify reopening.
-A full checkpoint follows each durable phase. Its `_maintenance` time is separate
-from individual acknowledgements; `_wall` includes it, verification and measurement
-gaps, with all updated rows as units. Compare those end-to-end costs as well. This
-family is explicit and is not included in the default `all` workload.
+Use `--phase batch_updates` to compare 1, 4, 16 and 64 changed-row updates per
+transaction. Each phase executes `--operations` batches; larger batches therefore
+update more rows. This family is excluded from `all`. Contents are verified after
+each phase, and durable runs verify reopening.
 
-`batch_update_N` latency measures acknowledgement of the entire atomic batch;
-`units` is N rows. Report batch p50/p95/p99 separately from amortized time per row
-(total batch milliseconds divided by rows) and row throughput. A single commit
-acknowledges the whole batch. The fixture supplies ready batches, so these timings
-exclude any application wait to accumulate them; they are not independent
-single-row acknowledgement latency. There is no engine group-commit implementation
-or reduced synchronization setting in this comparison.
+`batch_update_N` measures acknowledgement of the entire atomic batch; `units` is
+N rows. Report batch percentiles separately from amortized milliseconds per row.
+Durable phases finish with a separately timed `_maintenance` checkpoint; `_wall`
+also includes verification and measurement gaps. Batches are ready at submission,
+so timings exclude application queueing. Both engines retain ordinary synchronized
+commits; this benchmark adds no engine group commit.
