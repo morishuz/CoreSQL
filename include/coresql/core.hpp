@@ -242,6 +242,7 @@ public:
     std::shared_ptr<Index> index(const std::string&, const Type&, bool require_unique = false) const;
     void add(Function);
     void add(AggregateFunction);
+    bool has_aggregate(const std::string& name) const { return aggregates_.contains(name); }
     const AggregateFunction& aggregate(const std::string&) const;
     void validate(const Type&) const;
     void validate(const Value&, const Type& expected) const;

@@ -299,12 +299,7 @@ Expr Lowerer::expression(const Node& n) const {
     case Node::function: {
         if (n.name == "sql.cast_type")
             return stored_expression(n.args.at(0), type_of(n.value), true);
-        bool reduction = false;
-        try {
-            registry.aggregate(n.name);
-            reduction = true;
-        } catch (const Error&) {
-        }
+        const bool reduction = registry.has_aggregate(n.name);
         std::vector<Expr> args;
         if (n.args.size() == 1 && n.args[0].kind == Node::star) {
             if (!n.args[0].qualifier.empty())
