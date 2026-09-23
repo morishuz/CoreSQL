@@ -45,7 +45,7 @@ private:
     void evict(std::size_t target);
     void retain(const std::shared_ptr<Page>&, std::shared_ptr<Chunk>);
 };
-void page_state(State&, const std::shared_ptr<Pager>&);
+void page_state(State&, const State& base, const std::shared_ptr<Pager>&);
 Bytes encode_page(const Chunk&);
 std::shared_ptr<Chunk> decode_page(ByteView, const std::vector<Column>&, const Registry&);
 } // namespace coresql::detail

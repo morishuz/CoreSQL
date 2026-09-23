@@ -19,13 +19,17 @@ int main() {
         ChunkMap map;
         for (std::uint64_t id = 0; id < 257; ++id)
             map.emplace(id, chunk(static_cast<std::int64_t>(id)));
+        const auto initial_bytes = map.encoded_bytes();
         auto snapshot = map;
+        CHECK(map.changes_from(snapshot).empty());
         // Copies share metadata without incrementing every chunk's ownership.
         CHECK(map.find(0)->second.pin().use_count() == 2);
         map[64].writable()->rows[0][0] = std::int64_t{-1};
         CHECK(snapshot.find(64)->second.pin()->rows[0][0] == Value(std::int64_t{64}));
         CHECK(map.find(64)->second.pin()->rows[0][0] == Value(std::int64_t{-1}));
         CHECK(map.find(0)->second.pin().use_count() == 2);
+        CHECK(map.changes_from(snapshot).size() == 1);
+        CHECK(snapshot.encoded_bytes() == initial_bytes);
         // Reserve may leave an empty block after a failed insertion. Iteration,
         // reverse iteration, and subsequent copies must still see only entries.
         map.reserve_insert(10000);
@@ -59,6 +63,33 @@ int main() {
             if (!expected.empty())
                 CHECK(map.rbegin()->first == expected.rbegin()->first);
         }
+        const auto changes = map.changes_from(snapshot);
+        auto replayed = snapshot;
+        for (const auto& [id, ref] : changes) {
+            if (ref)
+                replayed[id] = ref;
+            else
+                CHECK(replayed.erase(id) == 1);
+        }
+        CHECK(replayed.changes_from(map).empty());
+        std::size_t bytes = 0;
+        for (const auto& [id, ref] : map) {
+            (void)id;
+            bytes += ref.encoded_bytes();
+        }
+        CHECK(map.encoded_bytes() == bytes);
+        map[42] = chunk(42);
+        (void)map.encoded_bytes();
+        auto& resized = map[42].writable();
+        resized->rows[0][0] = std::string(2000, 'x');
+        refresh(*resized);
+        std::size_t resized_bytes = 0;
+        for (const auto& [id, ref] : map) {
+            (void)id;
+            resized_bytes += ref.encoded_bytes();
+        }
+        CHECK(map.encoded_bytes() == resized_bytes);
+        CHECK(snapshot.encoded_bytes() == initial_bytes);
         CHECK(snapshot.size() == 257);
         for (const auto& [id, ref] : snapshot)
             CHECK(ref.pin()->rows[0][0] == Value(static_cast<std::int64_t>(id)));

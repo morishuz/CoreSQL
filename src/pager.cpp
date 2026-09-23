@@ -226,15 +226,20 @@ void Pager::release(std::uint64_t offset, std::size_t length) noexcept {
         // extent until this backing file closes, without affecting stored rows.
     }
 }
-void page_state(State& state, const std::shared_ptr<Pager>& pager) {
+void page_state(State& state, const State& base, const std::shared_ptr<Pager>& pager) {
     if (!pager)
         return;
     for (auto& [name, stored] : state.tables) {
-        (void)name;
+        const auto prior = base.tables.find(name);
+        if (prior != base.tables.end() && prior->second == stored)
+            continue;
+        const ChunkMap empty;
+        const auto changes =
+            stored->chunks.changes_from(prior == base.tables.end() ? empty : prior->second->chunks);
         std::shared_ptr<Table> edited;
         std::shared_ptr<const std::vector<Column>> columns;
-        for (const auto& [id, chunk] : stored->chunks) {
-            if (chunk.paged())
+        for (const auto& [id, chunk] : changes) {
+            if (!chunk || chunk.paged())
                 continue;
             if (!edited) {
                 edited = std::make_shared<Table>(*stored);

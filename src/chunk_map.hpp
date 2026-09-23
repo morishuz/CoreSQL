@@ -1,6 +1,8 @@
 #pragma once
 #include "coresql/core.hpp"
 #include <algorithm>
+#include <atomic>
+#include <limits>
 #include <iterator>
 
 namespace coresql::detail {
@@ -37,9 +39,11 @@ public:
 class ChunkMap {
     using Entry = std::pair<std::uint64_t, ChunkRef>;
     static constexpr std::size_t block_size = 64;
+    static constexpr auto unknown_size = std::numeric_limits<std::size_t>::max();
     struct Block {
         std::uint64_t number;
         std::vector<Entry> entries;
+        mutable std::atomic<std::size_t> encoded{unknown_size};
         explicit Block(std::uint64_t n) : number(n) { entries.reserve(block_size); }
         Block(const Block& other) : Block(other.number) {
             entries.assign(other.entries.begin(), other.entries.end());
@@ -61,10 +65,15 @@ class ChunkMap {
     Block& writable(std::size_t i) {
         if (blocks_[i].use_count() != 1)
             blocks_[i] = std::make_shared<Block>(*blocks_[i]);
+        blocks_[i]->encoded.store(unknown_size, std::memory_order_relaxed);
         return *blocks_[i];
     }
 
 public:
+    // Null references denote deletions. Shared blocks need no per-chunk comparison.
+    using Change = std::pair<std::uint64_t, ChunkRef>;
+    std::vector<Change> changes_from(const ChunkMap& previous) const;
+    std::size_t encoded_bytes() const;
     class const_iterator {
         const ChunkMap* owner_ = nullptr;
         std::size_t block_ = 0, entry_ = 0;

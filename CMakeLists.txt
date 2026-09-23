@@ -18,7 +18,7 @@ include(CMakePackageConfigHelpers)
 find_package(Threads REQUIRED)
 
 add_library(coresql
-  src/core.cpp src/read_snapshot.cpp src/query_cursor.cpp src/pager.cpp src/paged_index.cpp src/expression.cpp src/bound.cpp
+  src/core.cpp src/chunk_map.cpp src/read_snapshot.cpp src/query_cursor.cpp src/pager.cpp src/paged_index.cpp src/expression.cpp src/bound.cpp
   src/query.cpp src/query_scan.cpp src/query_join.cpp src/query_reduce.cpp
   src/disjunctive_join.cpp src/relation.cpp src/subquery_plan.cpp src/mutation.cpp
   src/transaction.cpp src/constraints.cpp src/schema.cpp src/registry.cpp src/index.cpp
@@ -210,6 +210,7 @@ if(BUILD_TESTING)
   coresql_test(coresql_comparison_test bound_comparisons tests/comparison_test.cpp coresql)
   coresql_test(coresql_addon_test addon_contracts tests/addon_test.cpp coresql_vector coresql_timestamp)
   coresql_test(coresql_mutation_test atomic_mutations tests/mutation_test.cpp coresql_vector coresql_timestamp)
+  coresql_test(coresql_chunk_changes_test chunk_changes tests/chunk_changes_test.cpp coresql)
   coresql_test(coresql_chunk_map_test chunk_map tests/chunk_map_test.cpp coresql)
   coresql_test(coresql_point_mutation_test point_mutations tests/point_mutation_test.cpp coresql)
   coresql_test(coresql_storage_test durable_recovery tests/storage_test.cpp coresql_vector coresql_timestamp)

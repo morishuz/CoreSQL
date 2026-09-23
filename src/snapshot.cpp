@@ -422,10 +422,7 @@ std::size_t detail::checkpoint_size(const State& state) {
         Bytes schema;
         write_schema(schema, *table);
         bytes += schema.size();
-        for (const auto& [id, chunk] : table->chunks) {
-            (void)id;
-            bytes += 16 + chunk.encoded_bytes();
-        }
+        bytes += 16 * table->chunks.size() + table->chunks.encoded_bytes();
         if (bytes > max_snapshot)
             throw Error(ErrorCode::format, "Live encoded state exceeds configured encoded-size limit");
     }
@@ -452,22 +449,14 @@ Bytes detail::encode_changes(const State& base, const State& next) {
         write_schema(data, *table);
         encoding::u64(data, table->next_chunk);
         encoding::u64(data, static_cast<std::uint64_t>(table->next_rowid));
-        std::size_t chunks = 0;
-        for (const auto& [id, chunk] : table->chunks) {
-            auto before = previous.chunks.find(id);
-            if (before == previous.chunks.end() || before->second != chunk)
-                ++chunks;
-        }
-        for (const auto& [id, chunk] : previous.chunks) {
-            (void)chunk;
-            if (!table->chunks.contains(id))
-                ++chunks;
-        }
-        encoding::u64(data, chunks);
-        for (const auto& [id, chunk] : table->chunks) {
-            auto before = previous.chunks.find(id);
-            if (before != previous.chunks.end() && before->second == chunk)
+        const auto changes = table->chunks.changes_from(previous.chunks);
+        encoding::u64(data, changes.size());
+        for (const auto& [id, chunk] : changes) {
+            if (!chunk) {
+                encoding::u64(data, id);
+                encoding::u64(data, 0);
                 continue;
+            }
             const auto pinned = chunk.pin();
             encoding::u64(data, id);
             encoding::u64(data, pinned->rows.size());
@@ -475,13 +464,6 @@ Bytes detail::encode_changes(const State& base, const State& next) {
                 encoding::u64(data, static_cast<std::uint64_t>(pinned->rowids[i]));
                 for (const auto& value : pinned->rows[i])
                     write_value(data, value);
-            }
-        }
-        for (const auto& [id, chunk] : previous.chunks) {
-            (void)chunk;
-            if (!table->chunks.contains(id)) {
-                encoding::u64(data, id);
-                encoding::u64(data, 0);
             }
         }
     }

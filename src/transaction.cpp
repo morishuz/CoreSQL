@@ -113,7 +113,7 @@ void Transaction::commit() {
     staged_->stats = detail::measure(*staged_);
     // Allocate before consuming staged state so allocation failure leaves it usable.
     auto next = std::make_shared<detail::State>(*staged_);
-    detail::page_state(*next, owner->pager);
+    detail::page_state(*next, *base_, owner->pager);
     if (owner->storage)
         owner->storage->commit(*base_, *next);
     owner->publish(std::move(next));
