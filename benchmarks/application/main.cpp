@@ -38,6 +38,7 @@ struct Workload {
         "INSERT INTO events VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET v=excluded.v";
     const std::string page = "SELECT id,ts FROM events WHERE device=? AND ts>? ORDER BY ts LIMIT 20";
     const std::string recent = "SELECT id,ts FROM events WHERE device=? ORDER BY ts DESC LIMIT 20";
+    const std::string scan = "SELECT count(*),sum(v) FROM events";
     const std::string range = "SELECT count(*),sum(v) FROM events WHERE ts>=? AND ts<?";
     const std::string join = "SELECT e.id,d.label FROM events AS e JOIN devices AS d ON e.device=d.id WHERE "
                              "e.id>=? AND e.id<? ORDER BY e.id";
@@ -127,13 +128,13 @@ struct Workload {
         }
         emit("load_and_initial_checkpoint", 0, elapsed(start, Clock::now()), n);
         for (const auto& text :
-             {point, update, insert, upsert, page, recent, range, join, std::string("BEGIN"),
+             {point, update, insert, upsert, page, recent, range, scan, join, std::string("BEGIN"),
               std::string("COMMIT"), std::string("DELETE FROM events WHERE ts<?")})
             engine.prepare(text);
     }
     void reads() {
         for (const std::string phase :
-             {"point_read", "event_page", "latest_events", "time_range", "small_join"}) {
+             {"point_read", "event_page", "latest_events", "time_range", "small_join", "full_scan"}) {
             if (!enabled(phase))
                 continue;
             for (std::int64_t i = -1; i < operations; ++i) {
@@ -159,6 +160,10 @@ struct Workload {
                              id -= 100)
                             expected.push_back({id, id});
                     }
+                } else if (phase == "full_scan") {
+                    sql = scan;
+                    const auto remainder = n % 97;
+                    expected = {{n, (n / 97) * (96 * 97 / 2) + remainder * (remainder - 1) / 2}};
                 } else if (phase == "time_range") {
                     sql = range;
                     args = {key, key + 100};
@@ -344,9 +349,9 @@ int main(int argc, char** argv) {
               "Arguments out of bounds");
         const std::string phase = argv[8];
         check(phase == "all" || phase == "point_read" || phase == "event_page" || phase == "latest_events" ||
-                  phase == "time_range" || phase == "small_join" || phase == "point_update" ||
-                  phase == "upsert_existing" || phase == "upsert_unchanged" || phase == "upsert_new" ||
-                  phase == "append_16" || phase == "expire_16" || phase == "mixed",
+                  phase == "time_range" || phase == "small_join" || phase == "full_scan" ||
+                  phase == "point_update" || phase == "upsert_existing" || phase == "upsert_unchanged" ||
+                  phase == "upsert_new" || phase == "append_16" || phase == "expire_16" || phase == "mixed",
               "Unknown phase");
         Temporary temp(argv[7]);
         Backend backend(engine == "coresql", mode == "durable", static_cast<std::size_t>(cache) * 1024 * 1024,

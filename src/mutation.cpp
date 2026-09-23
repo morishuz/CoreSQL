@@ -3,6 +3,7 @@
 #include "index.hpp"
 #include "storage.hpp"
 #include "stored_value.hpp"
+#include <type_traits>
 
 namespace coresql {
 using namespace detail::execution;
@@ -212,8 +213,8 @@ std::size_t Transaction::update_impl(const std::string& name, std::vector<Assign
     if (selected)
         normalize(*selected);
     // A point update that leaves keys and relational constraints untouched can
-    // prepare just its new row. Publication then needs no throwing callbacks;
-    // writable() still copies any chunk retained by a snapshot or savepoint.
+    // prepare changed cells before detaching its chunk. Publication then needs
+    // no throwing callbacks or allocations; retained snapshots still keep their rows.
     auto row_only = [&] {
         if (!selected || selected->rows.size() != 1 || !original.constraints.checks.empty() ||
             !original.constraints.foreign_keys.empty() ||
@@ -233,7 +234,7 @@ std::size_t Transaction::update_impl(const std::string& name, std::vector<Assign
         return true;
     };
     if (row_only()) {
-        std::optional<Row> prepared;
+        std::vector<std::pair<std::size_t, Value>> prepared;
         bool matched = false;
         std::size_t position = 0;
         visit_chunks(original, selected, [&](auto, const auto& chunk, RowSelection rows) {
@@ -249,23 +250,30 @@ std::size_t Transaction::update_impl(const std::string& name, std::vector<Assign
                 for (const auto& [index, expression] : bound) {
                     auto value = expression.evaluate(row, owner->registry);
                     detail::validate_stored(value, original.columns[index], owner->registry);
-                    if (!prepared && !detail::same_stored_value(row[index], value))
-                        prepared = row;
-                    if (prepared)
-                        (*prepared)[index] = std::move(value);
+                    if (!detail::same_stored_value(row[index], value)) {
+                        if (prepared.empty())
+                            prepared.reserve(bound.size());
+                        prepared.emplace_back(index, std::move(value));
+                    }
                 }
-                if (returning)
-                    returning->push_back(prepared ? *prepared : row);
+                if (returning) {
+                    Row result = row;
+                    for (const auto& [index, value] : prepared)
+                        result[index] = value;
+                    returning->push_back(std::move(result));
+                }
                 return true;
             });
             return true;
         });
-        if (!prepared)
+        if (prepared.empty())
             return matched ? 1 : 0;
         auto replacement = stored.use_count() == 1 ? stored : std::make_shared<detail::Table>(original);
         auto& chunk = replacement->chunks[selected->rows.front().chunk].writable();
         const auto prior_bytes = chunk->payload_bytes;
-        chunk->rows[position].swap(*prepared);
+        static_assert(std::is_nothrow_move_assignable_v<Value>);
+        for (auto& [index, value] : prepared)
+            chunk->rows[position][index] = std::move(value);
         chunk->encoding_id = detail::next_chunk_encoding_id();
         detail::refresh(*chunk);
         replacement->payload_bytes = replacement->payload_bytes - prior_bytes + chunk->payload_bytes;

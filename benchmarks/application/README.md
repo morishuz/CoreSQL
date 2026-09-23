@@ -52,6 +52,7 @@ They access data and therefore affect subsequent cache state.
 - Primary-key reads return a value and payload, with changing keys.
 - Keyset event pages and latest-event queries return up to 20 IDs/timestamps.
 - Time-range aggregates count and sum 100 consecutive events.
+- Full-table aggregates count and sum the seeded events, exercising sequential scans.
 - Small joins fetch ten events with their device labels.
 - Single-row updates and changed-existing/new-key UPSERT each have their own
   transaction. A separate `upsert_unchanged` phase reapplies the current value; it

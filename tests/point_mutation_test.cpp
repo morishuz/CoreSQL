@@ -135,6 +135,31 @@ int main() {
             db.reset();
             db.emplace(Database::open(path, registry, options));
             CHECK(db->query(Query{"t"}).rows.size() == 301);
+            {
+                auto tx = db->begin();
+                tx.erase("t", Predicate{column("id"), Compare::equal, literal(std::int64_t{149})});
+                tx.commit();
+            }
+            const auto original = db->query(Query{"t"}).rows;
+            auto expected = original;
+            for (auto& row : expected)
+                if (row[0] == Value(std::int64_t{150}))
+                    row[3] = std::string(24000, 'z');
+            {
+                auto retained = db->begin();
+                auto tx = db->begin();
+                tx.update("t", {{"note", literal(std::string(24000, 'z'))}}, key);
+                CHECK(tx.query(Query{"t"}).rows == expected);
+                CHECK(retained.query(Query{"t"}).rows == original);
+                tx.integrity_check();
+                tx.commit();
+                CHECK(retained.query(Query{"t"}).rows == original);
+            }
+            db->checkpoint();
+            db.reset();
+            db.emplace(Database::open(path, registry, options));
+            CHECK(db->query(Query{"t"}).rows == expected);
+            db->begin().integrity_check();
         }
     });
 }
