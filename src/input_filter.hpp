@@ -42,15 +42,21 @@ inline std::optional<std::pair<Tables, Query>> prepare_join_inputs(const Tables&
         Scope scope(*table);
         scope.left_alias = alias;
         auto predicate = bind_predicate(early, scope, registry);
+        auto candidates = join_guard_candidates(*table, *predicate, registry);
+        QueryBuffer candidate_memory;
+        if (candidates)
+            candidate_memory.add(candidates->rows.size() * sizeof(RowLocation));
         std::vector<RowLocation> selected;
-        visit_table_rows(*table, [&](auto location, const Row& row, auto rowid) {
+        visit_chunks(*table, candidates, [&](auto id, const auto& chunk, RowSelection rows) {
+            return visit_rows(*chunk, rows, [&](auto position, const Row& row) {
 #ifdef CORESQL_TESTING
-            if (auto* counters = active_query_counters)
-                ++counters->rows_tested;
+                if (auto* counters = active_query_counters)
+                    ++counters->rows_tested;
 #endif
-            if (predicate->truth(RowView(row, rowid), registry) != 0)
-                selected.push_back(location);
-            return true;
+                if (predicate->truth(RowView(row, chunk->rowids[position]), registry) != 0)
+                    selected.push_back({id, chunk->slot(position)});
+                return true;
+            });
         });
         if (selected.size() == table->row_count)
             return;

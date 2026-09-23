@@ -1,7 +1,52 @@
 #include "bound.hpp"
 #include "ordered_index.hpp"
+#include "index.hpp"
 
 namespace coresql::detail::execution {
+std::optional<IndexResult> join_guard_candidates(const Table& table, const BoundPredicate& guard,
+                                                 const Registry& registry) {
+    if (guard.kind == Predicate::Kind::any) {
+        IndexResult result;
+        for (const auto& child : guard.children) {
+            auto selected = join_guard_candidates(table, child, registry);
+            if (!selected)
+                return {}; // An unindexed arm may retain any row, including UNKNOWN.
+            result.rows.insert(result.rows.end(), selected->rows.begin(), selected->rows.end());
+        }
+        normalize(result);
+        return result;
+    }
+    std::optional<BoundPredicate> keys{BoundPredicate{Predicate::Kind::all, {}, {}, {}}};
+    auto collect = [&](auto&& self, const BoundPredicate& p) -> void {
+        if (p.kind == Predicate::Kind::all) {
+            for (const auto& child : p.children)
+                self(self, child);
+        } else if (const auto* leaf = p.direct_comparison();
+                   leaf && leaf->left.index < table.columns.size() && !is_null(leaf->right.value) &&
+                   !table.columns[leaf->left.index].nullable &&
+                   native_scalar(registry.addon(leaf->left.type))) {
+            // These conjuncts cannot be UNKNOWN. Nullable guards remain in the
+            // residual; discarding their NULL keys would change error behavior.
+            keys->children.push_back(BoundPredicate{Predicate::Kind::comparison, *leaf, {}, {}});
+        }
+    };
+    collect(collect, guard);
+    if (keys->children.empty())
+        return {};
+    if (table.primary) {
+        auto point = std::find_if(keys->children.begin(), keys->children.end(), [&](const auto& p) {
+            return p.leaf->left.index == table.primary->column && p.leaf->operation == Compare::equal;
+        });
+        if (point != keys->children.end())
+            std::iter_swap(keys->children.begin(), point);
+    }
+    // candidates may consume an exact guard, but only this disposable copy.
+    auto result = candidates(table, keys, registry);
+    if (result)
+        normalize(*result);
+    return result;
+}
+
 std::optional<IndexResult> composite_candidates(const Table& table,
                                                 const std::optional<BoundPredicate>& predicate,
                                                 const Registry& registry) {
